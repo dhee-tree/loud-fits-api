@@ -135,6 +135,8 @@ CORS_ALLOWED_ORIGINS = config("CORS_ALLOWED_ORIGINS").split(",")
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+AUTH_USER_MODEL = 'user.User'
+
 # Rest Framework settings
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
