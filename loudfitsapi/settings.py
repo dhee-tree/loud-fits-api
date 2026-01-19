@@ -31,6 +31,9 @@ DEBUG = config('DEBUG', cast=bool)
 
 ALLOWED_HOSTS = config("ALLOWED_HOSTS").split(",")
 
+ENABLE_GOOGLE_AUTH = config('ENABLE_GOOGLE_AUTH', default=False, cast=bool)
+GOOGLE_CLIENT_ID = config('GOOGLE_CLIENT_ID', default="", cast=str)
+
 
 # Application definition
 
@@ -42,7 +45,9 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    'corsheaders'
+    'corsheaders',
+    'user',
+    'api',
 ]
 
 MIDDLEWARE = [
