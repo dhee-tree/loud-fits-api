@@ -1,0 +1,13 @@
+[run]
+source = authentication,user,api
+omit = 
+    */migrations/*
+    */tests.py
+    */__init__.py
+
+[report]
+show_missing = True
+skip_covered = False
+
+[html]
+directory = htmlcov

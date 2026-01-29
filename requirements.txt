@@ -4,6 +4,7 @@ CacheControl==0.14.4
 cachetools==6.2.4
 certifi==2025.11.12
 charset-normalizer==3.4.4
+coverage==7.13.2
 cyclonedx-python-lib==11.6.0
 defusedxml==0.7.1
 Django==6.0

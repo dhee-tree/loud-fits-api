@@ -91,6 +91,30 @@ For more detailed output, you can add the `-v 2` flag:
 python manage.py test -v 2
 ```
 
+### Test Coverage
+
+To measure test coverage, use the `coverage` package. The project includes a `.coveragerc` config file for simplified commands:
+
+1. Run tests with coverage tracking:
+
+    ```bash
+    coverage run manage.py test
+    ```
+
+2. View the coverage report in the terminal:
+
+    ```bash
+    coverage report
+    ```
+
+3. Generate an HTML report for detailed browsing:
+
+    ```bash
+    coverage html
+    ```
+
+    Open `htmlcov/index.html` in your browser to view the interactive report.
+
 ## Auditing
 
 To audit the codebase for security vulnerabilities we use `pip-audit`. To run an audit, use the following command:
