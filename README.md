@@ -13,13 +13,18 @@ To set up the Loud Fits API locally, follow these steps:
 1. Clone the repository:
 1. Install and activate a virtual environment:
 
-   ```bash
+    ```bash
     python -m venv venv
-    source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+    venv\Scripts\activate
+    
+    # On macOS/Linux
+    source venv/bin/activate 
+    ```
 
-    # Optionally, upgrade pip
+    Optionally, upgrade pip:
+    ```bash
     pip install --upgrade pip
-   ```
+    ```
 
 1. Install the required dependencies:
 
