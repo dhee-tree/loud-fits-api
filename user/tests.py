@@ -30,7 +30,7 @@ class UserMeTests(TestCase):
         self.assertIn('role', response.data)
         self.assertIn('account_type', response.data)
         self.assertIn('profile', response.data)
-        self.assertIn('gender', response.data['profile'])
+        self.assertIn('shopping_preference', response.data['profile'])
         self.assertIn('stylist_enabled', response.data['profile'])
 
     def test_get_me_unauthenticated(self):

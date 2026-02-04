@@ -6,10 +6,11 @@ from user.models import User
 
 
 class Profile(models.Model):
-    class Gender(models.TextChoices):
-        MALE = 'MALE', 'Male'
-        FEMALE = 'FEMALE', 'Female'
-        OTHER = 'OTHER', 'Other'
+    class ShoppingPreference(models.TextChoices):
+        MENSWEAR = 'MENSWEAR', 'Menswear'
+        WOMENSWEAR = 'WOMENSWEAR', 'Womenswear'
+        UNISEX = 'UNISEX', 'Unisex'
+        NO_PREFERENCE = 'NO_PREFERENCE', 'No Preference'
 
     class AvatarSize(models.TextChoices):
         SMALL = 'SMALL', 'Small'
@@ -20,8 +21,8 @@ class Profile(models.Model):
         primary_key=True, default=uuid.uuid4, editable=False, unique=True)
     user = models.OneToOneField(
         User, on_delete=models.CASCADE, related_name='profile')
-    gender = models.CharField(
-        max_length=10, choices=Gender.choices, blank=True, null=True)
+    shopping_preference = models.CharField(
+        max_length=15, choices=ShoppingPreference.choices, blank=True, null=True)
     avatar_size = models.CharField(
         max_length=10,
         choices=AvatarSize.choices,
@@ -30,6 +31,7 @@ class Profile(models.Model):
     profile_picture = models.ImageField(
         upload_to='profile_pictures/', blank=True, null=True)
     stylist_enabled = models.BooleanField(default=False)
+    onboarding_completed = models.BooleanField(default=False)
 
     def __str__(self):
         return f"Profile of {self.user.email}"
