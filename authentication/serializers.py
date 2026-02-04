@@ -18,16 +18,19 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['username', 'email', 'password', 'password_confirm', 'first_name', 'last_name']
+        fields = ['email', 'password',
+                  'password_confirm', 'first_name', 'last_name']
 
     def validate(self, attrs):
         if attrs['password'] != attrs['password_confirm']:
-            raise serializers.ValidationError({"password_confirm": "Passwords do not match."})
+            raise serializers.ValidationError(
+                {"password_confirm": "Passwords do not match."})
         return attrs
 
     def create(self, validated_data):
         validated_data.pop('password_confirm')
         password = validated_data.pop('password')
+        validated_data['username'] = validated_data['email']
         user = User(**validated_data)
         user.set_password(password)
         user.save()

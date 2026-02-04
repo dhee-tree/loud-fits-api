@@ -7,7 +7,7 @@ from user.models import User
 
 class AuthTestCase(TestCase):
     """Base test class with common setup for authentication tests."""
-    
+
     @classmethod
     def setUpTestData(cls):
         """Create test user once for all tests in the class."""
@@ -16,10 +16,10 @@ class AuthTestCase(TestCase):
             'email': 'test@example.com',
             'password': 'testpassword123'
         }
-    
+
     def setUp(self):
         self.client = APIClient()
-    
+
     def create_test_user(self, **kwargs):
         """Create a test user with default or custom data."""
         data = {**self.test_user_data, **kwargs}
@@ -80,7 +80,6 @@ class RegistrationTests(AuthTestCase):
     def test_register_success(self):
         """Test successful user registration."""
         data = {
-            'username': 'newuser',
             'email': 'newuser@example.com',
             'password': 'securepassword123',
             'password_confirm': 'securepassword123',
@@ -94,19 +93,18 @@ class RegistrationTests(AuthTestCase):
         self.assertIn('access', response.data)
         self.assertIn('refresh', response.data)
         self.assertIn('user', response.data)
-        self.assertEqual(response.data['user']['username'], 'newuser')
         self.assertEqual(response.data['user']['email'], 'newuser@example.com')
+        self.assertIn('uuid', response.data['user'])
 
         # Verify user was created in database
-        user = User.objects.get(username='newuser')
-        self.assertEqual(user.email, 'newuser@example.com')
+        user = User.objects.get(email='newuser@example.com')
+        self.assertEqual(user.username, 'newuser@example.com')
         self.assertEqual(user.first_name, 'New')
         self.assertEqual(user.last_name, 'User')
 
     def test_register_password_mismatch(self):
         """Test registration fails when passwords don't match."""
         data = {
-            'username': 'newuser',
             'email': 'newuser@example.com',
             'password': 'securepassword123',
             'password_confirm': 'differentpassword',
@@ -120,7 +118,6 @@ class RegistrationTests(AuthTestCase):
     def test_register_password_too_short(self):
         """Test registration fails when password is too short."""
         data = {
-            'username': 'newuser',
             'email': 'newuser@example.com',
             'password': 'short',
             'password_confirm': 'short',
@@ -131,13 +128,13 @@ class RegistrationTests(AuthTestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('password', response.data)
 
-    def test_register_duplicate_username(self):
-        """Test registration fails with duplicate username."""
-        User.objects.create_user(username='existinguser', email='existing@example.com', password='password123')
+    def test_register_duplicate_email(self):
+        """Test registration fails with duplicate email."""
+        User.objects.create_user(username='existing@example.com',
+                                 email='existing@example.com', password='password123')
 
         data = {
-            'username': 'existinguser',
-            'email': 'newuser@example.com',
+            'email': 'existing@example.com',
             'password': 'securepassword123',
             'password_confirm': 'securepassword123',
         }
@@ -145,14 +142,14 @@ class RegistrationTests(AuthTestCase):
         response = self.client.post(self.url, data)
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('username', response.data)
+        self.assertIn('email', response.data)
 
     def test_register_missing_required_fields(self):
         """Test registration fails when required fields are missing."""
         response = self.client.post(self.url, {})
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('username', response.data)
+        self.assertIn('email', response.data)
         self.assertIn('password', response.data)
 
 
@@ -163,7 +160,7 @@ class LoginTests(AuthTestCase):
         self.user = self.create_test_user()
 
     def test_login_success(self):
-        """Test successful login returns tokens."""
+        """Test successful login returns user data and tokens."""
         data = {
             'email': 'test@example.com',
             'password': 'testpassword123'
@@ -174,6 +171,9 @@ class LoginTests(AuthTestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('access', response.data)
         self.assertIn('refresh', response.data)
+        self.assertIn('user', response.data)
+        self.assertEqual(response.data['user']['email'], 'test@example.com')
+        self.assertIn('uuid', response.data['user'])
 
     def test_login_wrong_password(self):
         """Test login fails with wrong password."""

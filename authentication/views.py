@@ -28,12 +28,53 @@ class RegisterView(generics.CreateAPIView):
         return Response({
             'user': {
                 'uuid': str(user.uuid),
-                'username': user.username,
                 'email': user.email,
             },
             'access': str(refresh.access_token),
             'refresh': str(refresh),
         }, status=status.HTTP_201_CREATED)
+
+
+class LoginView(APIView):
+    """
+    API endpoint for user login with email and password.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = request.data.get('email')
+        password = request.data.get('password')
+
+        if not email or not password:
+            return Response(
+                {"error": "Email and password are required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response(
+                {"error": "Invalid credentials."},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        if not user.check_password(password):
+            return Response(
+                {"error": "Invalid credentials."},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        refresh = RefreshToken.for_user(user)
+
+        return Response({
+            'user': {
+                'uuid': str(user.uuid),
+                'email': user.email,
+            },
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+        }, status=status.HTTP_200_OK)
 
 
 class GoogleLoginView(APIView):
