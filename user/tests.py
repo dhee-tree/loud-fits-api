@@ -27,6 +27,11 @@ class UserMeTests(TestCase):
         self.assertEqual(response.data['last_name'], 'User')
         self.assertEqual(response.data['full_name'], 'Test User')
         self.assertIn('uuid', response.data)
+        self.assertIn('role', response.data)
+        self.assertIn('account_type', response.data)
+        self.assertIn('profile', response.data)
+        self.assertIn('gender', response.data['profile'])
+        self.assertIn('stylist_enabled', response.data['profile'])
 
     def test_get_me_unauthenticated(self):
         """Test getting current user details when not authenticated."""
