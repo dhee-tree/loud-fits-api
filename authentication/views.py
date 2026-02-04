@@ -29,6 +29,8 @@ class RegisterView(generics.CreateAPIView):
             'user': {
                 'uuid': str(user.uuid),
                 'email': user.email,
+                'role': user.role,
+                'account_type': user.account_type,
             },
             'access': str(refresh.access_token),
             'refresh': str(refresh),
@@ -71,6 +73,8 @@ class LoginView(APIView):
             'user': {
                 'uuid': str(user.uuid),
                 'email': user.email,
+                'role': user.role,
+                'account_type': user.account_type,
             },
             'access': str(refresh.access_token),
             'refresh': str(refresh),
@@ -135,6 +139,12 @@ class GoogleLoginView(APIView):
             refresh = RefreshToken.for_user(user)
 
             response_data = {
+                'user': {
+                    'uuid': str(user.uuid),
+                    'email': user.email,
+                    'role': user.role,
+                    'account_type': user.account_type,
+                },
                 'access': str(refresh.access_token),
                 'refresh': str(refresh),
             }

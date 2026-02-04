@@ -54,6 +54,11 @@ class GoogleAuthTests(AuthTestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('access', response.data)
         self.assertIn('refresh', response.data)
+        self.assertIn('user', response.data)
+        self.assertIn('uuid', response.data['user'])
+        self.assertEqual(response.data['user']['email'], 'test@example.com')
+        self.assertIn('role', response.data['user'])
+        self.assertIn('account_type', response.data['user'])
 
         # Verify user created
         user = User.objects.get(email='test@example.com')
@@ -95,6 +100,8 @@ class RegistrationTests(AuthTestCase):
         self.assertIn('user', response.data)
         self.assertEqual(response.data['user']['email'], 'newuser@example.com')
         self.assertIn('uuid', response.data['user'])
+        self.assertIn('role', response.data['user'])
+        self.assertIn('account_type', response.data['user'])
 
         # Verify user was created in database
         user = User.objects.get(email='newuser@example.com')
@@ -174,6 +181,8 @@ class LoginTests(AuthTestCase):
         self.assertIn('user', response.data)
         self.assertEqual(response.data['user']['email'], 'test@example.com')
         self.assertIn('uuid', response.data['user'])
+        self.assertIn('role', response.data['user'])
+        self.assertIn('account_type', response.data['user'])
 
     def test_login_wrong_password(self):
         """Test login fails with wrong password."""
