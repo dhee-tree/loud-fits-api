@@ -1,5 +1,5 @@
 """
-WSGI config for loudfitsapi project.
+WSGI config for loud_fits_api project.
 
 It exposes the WSGI callable as a module-level variable named ``application``.
 
@@ -11,6 +11,6 @@ import os
 
 from django.core.wsgi import get_wsgi_application
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'loudfitsapi.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'loud_fits_api.settings')
 
 application = get_wsgi_application()

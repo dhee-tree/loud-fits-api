@@ -7,15 +7,15 @@ from user.models import User
 
 class Profile(models.Model):
     class ShoppingPreference(models.TextChoices):
-        MENSWEAR = 'MENSWEAR', 'Menswear'
-        WOMENSWEAR = 'WOMENSWEAR', 'Womenswear'
-        UNISEX = 'UNISEX', 'Unisex'
-        NO_PREFERENCE = 'NO_PREFERENCE', 'No Preference'
+        MENSWEAR = 'Menswear', 'Menswear'
+        WOMENSWEAR = 'Womenswear', 'Womenswear'
+        UNISEX = 'Unisex', 'Unisex'
+        NO_PREFERENCE = 'No Preference', 'No Preference'
 
     class AvatarSize(models.TextChoices):
-        SMALL = 'SMALL', 'Small'
-        MEDIUM = 'MEDIUM', 'Medium'
-        LARGE = 'LARGE', 'Large'
+        SMALL = 'Small', 'Small'
+        MEDIUM = 'Medium', 'Medium'
+        LARGE = 'Large', 'Large'
 
     uuid = models.UUIDField(
         primary_key=True, default=uuid.uuid4, editable=False, unique=True)
