@@ -3,7 +3,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.conf import settings
-from .serializers import GoogleLoginSerializer, RegisterSerializer
+from .serializers import GoogleLoginSerializer, RegisterSerializer, StoreRegisterSerializer
 from google.oauth2 import id_token
 from google.auth.transport import requests
 from user.models import User
@@ -19,6 +19,33 @@ class RegisterView(generics.CreateAPIView):
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+
+        # Generate JWT tokens for the new user
+        refresh = RefreshToken.for_user(user)
+
+        return Response({
+            'user': {
+                'uuid': str(user.uuid),
+                'email': user.email,
+                'role': user.role,
+                'account_type': user.account_type,
+            },
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+        }, status=status.HTTP_201_CREATED)
+
+
+class StoreRegisterView(APIView):
+    """
+    API endpoint for store registration.
+    Creates a User with account_type='Store' and an associated Store.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = StoreRegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
 

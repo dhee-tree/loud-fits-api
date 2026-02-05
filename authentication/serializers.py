@@ -1,5 +1,7 @@
 from rest_framework import serializers
+from django.utils.text import slugify
 from user.models import User
+from store.models import Store
 
 
 class GoogleLoginSerializer(serializers.Serializer):
@@ -34,4 +36,54 @@ class RegisterSerializer(serializers.ModelSerializer):
         user = User(**validated_data)
         user.set_password(password)
         user.save()
+        return user
+
+
+class StoreRegisterSerializer(serializers.Serializer):
+    """
+    Serializer for store registration - creates both User and Store.
+    """
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True, min_length=8)
+    store_name = serializers.CharField(max_length=255)
+    first_name = serializers.CharField(max_length=150)
+    last_name = serializers.CharField(max_length=150)
+
+    def validate_email(self, value):
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("A user with this email already exists.")
+        return value
+
+    def validate_store_name(self, value):
+        # Generate slug and check uniqueness
+        slug = slugify(value)
+        if Store.objects.filter(slug=slug).exists():
+            raise serializers.ValidationError("A store with this name already exists.")
+        return value
+
+    def create(self, validated_data):
+        email = validated_data['email']
+        password = validated_data['password']
+        store_name = validated_data['store_name']
+        first_name = validated_data['first_name']
+        last_name = validated_data['last_name']
+
+        # Create user with account_type=STORE
+        user = User(
+            email=email,
+            username=email,
+            account_type=User.AccountType.STORE,
+            first_name=first_name,
+            last_name=last_name,
+        )
+        user.set_password(password)
+        user.save()
+
+        # Create store
+        store = Store.objects.create(
+            owner=user,
+            name=store_name,
+            slug=slugify(store_name),
+        )
+
         return user

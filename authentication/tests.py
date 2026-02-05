@@ -3,6 +3,7 @@ from rest_framework.test import APIClient
 from rest_framework import status
 from unittest.mock import patch, MagicMock
 from user.models import User
+from store.models import Store
 
 
 class AuthTestCase(TestCase):
@@ -237,3 +238,118 @@ class TokenRefreshTests(AuthTestCase):
         response = self.client.post(self.url, {'refresh': 'invalid-token'})
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class StoreRegistrationTests(AuthTestCase):
+    """Tests for store registration endpoint."""
+
+    def setUp(self):
+        super().setUp()
+        self.url = '/api/auth/store/register/'
+
+    def test_store_register_success(self):
+        """Test successful store registration creates user and store."""
+        data = {
+            'email': 'store@example.com',
+            'password': 'securepassword123',
+            'store_name': 'My Awesome Store'
+        }
+
+        response = self.client.post(self.url, data)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIn('access', response.data)
+        self.assertIn('refresh', response.data)
+        self.assertIn('user', response.data)
+        self.assertEqual(response.data['user']['email'], 'store@example.com')
+        self.assertIn('uuid', response.data['user'])
+        self.assertEqual(response.data['user']['role'], 'User')
+        self.assertEqual(response.data['user']['account_type'], 'Store')
+
+        # Verify user was created with correct account_type
+        user = User.objects.get(email='store@example.com')
+        self.assertEqual(user.account_type, User.AccountType.STORE)
+
+        # Verify store was created
+        store = Store.objects.get(owner=user)
+        self.assertEqual(store.name, 'My Awesome Store')
+        self.assertEqual(store.slug, 'my-awesome-store')
+
+    def test_store_register_duplicate_email(self):
+        """Test store registration fails with duplicate email."""
+        User.objects.create_user(
+            username='existing@example.com',
+            email='existing@example.com',
+            password='password123'
+        )
+
+        data = {
+            'email': 'existing@example.com',
+            'password': 'securepassword123',
+            'store_name': 'My Store'
+        }
+
+        response = self.client.post(self.url, data)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('email', response.data)
+
+    def test_store_register_duplicate_store_name(self):
+        """Test store registration fails with duplicate store name (slug)."""
+        # Create existing store
+        existing_user = User.objects.create_user(
+            username='existing@example.com',
+            email='existing@example.com',
+            password='password123'
+        )
+        Store.objects.create(
+            owner=existing_user,
+            name='My Store',
+            slug='my-store'
+        )
+
+        data = {
+            'email': 'newstore@example.com',
+            'password': 'securepassword123',
+            'store_name': 'My Store'  # Same name, will generate same slug
+        }
+
+        response = self.client.post(self.url, data)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('store_name', response.data)
+
+    def test_store_register_password_too_short(self):
+        """Test store registration fails when password is too short."""
+        data = {
+            'email': 'store@example.com',
+            'password': 'short',
+            'store_name': 'My Store'
+        }
+
+        response = self.client.post(self.url, data)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('password', response.data)
+
+    def test_store_register_missing_required_fields(self):
+        """Test store registration fails when required fields are missing."""
+        response = self.client.post(self.url, {})
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('email', response.data)
+        self.assertIn('password', response.data)
+        self.assertIn('store_name', response.data)
+
+    def test_store_register_invalid_email(self):
+        """Test store registration fails with invalid email format."""
+        data = {
+            'email': 'not-an-email',
+            'password': 'securepassword123',
+            'store_name': 'My Store'
+        }
+
+        response = self.client.post(self.url, data)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('email', response.data)
