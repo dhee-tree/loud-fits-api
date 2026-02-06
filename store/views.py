@@ -1,14 +1,38 @@
 import json
 from django.utils import timezone
-from rest_framework import status
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import status, generics
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, JSONParser
+from rest_framework.filters import SearchFilter, OrderingFilter
 
+from api_common.pagination import Paginator
+from .filters import StoreProductFilter
 from .permissions import IsStoreOwner
 from .serializers import FeedUploadSerializer, validate_feed_products
 from product.models import Product, ProductImportBatch
+from product.serializers import ProductListSerializer
+
+
+class StoreProductListView(generics.ListAPIView):
+    """
+    GET /api/store/products/
+
+    List products for the authenticated store owner with filtering and pagination.
+    """
+    permission_classes = [IsAuthenticated, IsStoreOwner]
+    serializer_class = ProductListSerializer
+    pagination_class = Paginator
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = StoreProductFilter
+    search_fields = ["name", "external_id"]
+    ordering_fields = ["created_at", "updated_at",
+                       "name", "price", "stock_status", "stock_quantity"]
+
+    def get_queryset(self):
+        return Product.objects.filter(store=self.request.user.store)
 
 
 class FeedPreviewView(APIView):

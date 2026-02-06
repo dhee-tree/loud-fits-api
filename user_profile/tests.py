@@ -39,14 +39,14 @@ class ProfileTests(TestCase):
     def test_patch_profile_update_shopping_preference(self):
         """Test updating profile shopping_preference."""
         self.client.force_authenticate(user=self.user)
-        response = self.client.patch(self.url, {'shopping_preference': 'MALE'})
+        response = self.client.patch(self.url, {'shopping_preference': 'Menswear'})
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['shopping_preference'], 'MALE')
+        self.assertEqual(response.data['shopping_preference'], 'Menswear')
 
         # Verify database was updated
         self.user.profile.refresh_from_db()
-        self.assertEqual(self.user.profile.shopping_preference, 'MALE')
+        self.assertEqual(self.user.profile.shopping_preference, 'Menswear')
 
     def test_patch_profile_enable_stylist(self):
         """Test enabling stylist mode."""

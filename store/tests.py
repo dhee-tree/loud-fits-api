@@ -5,7 +5,7 @@ from rest_framework.test import APIClient
 from rest_framework import status
 from user.models import User
 from store.models import Store
-from product.models import Product, ProductImportBatch
+from product.models import Product, ProductImportBatch, StockStatus
 
 
 class StoreTestCase(TestCase):
@@ -446,3 +446,105 @@ class FeedImportTests(StoreTestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data['imported'], 2)
+
+
+class StoreProductListTests(StoreTestCase):
+    """Tests for the store product list endpoint."""
+
+    def setUp(self):
+        super().setUp()
+        self.url = "/api/store/products/"
+        self.user, self.store = self.create_store_user()
+        self.other_user, self.other_store = self.create_store_user(
+            email="other@example.com",
+            store_slug="other-store",
+        )
+
+        Product.objects.create(
+            store=self.store,
+            external_id="EXT-001",
+            name="Blue Tee",
+            category="top",
+            image_url="https://example.com/blue.jpg",
+            price=19.99,
+            currency="GBP",
+            product_url="https://example.com/blue",
+            is_active=True,
+            stock_status=StockStatus.IN_STOCK,
+            stock_quantity=15,
+        )
+        Product.objects.create(
+            store=self.store,
+            external_id="EXT-002",
+            name="Black Jeans",
+            category="bottom",
+            image_url="https://example.com/black.jpg",
+            price=49.99,
+            currency="GBP",
+            product_url="https://example.com/black",
+            is_active=False,
+            stock_status=StockStatus.OUT_OF_STOCK,
+            stock_quantity=0,
+        )
+        Product.objects.create(
+            store=self.other_store,
+            external_id="EXT-003",
+            name="Other Store Tee",
+            category="top",
+            image_url="https://example.com/other.jpg",
+            price=9.99,
+            currency="GBP",
+            product_url="https://example.com/other",
+            is_active=True,
+            stock_status=StockStatus.IN_STOCK,
+            stock_quantity=8,
+        )
+
+    def test_products_requires_authentication(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_products_requires_store_account(self):
+        regular_user = self.create_regular_user()
+        self.client.force_authenticate(user=regular_user)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_products_lists_store_products_only(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 2)
+        self.assertEqual(len(response.data["results"]), 2)
+        external_ids = {item["external_id"] for item in response.data["results"]}
+        self.assertSetEqual(external_ids, {"EXT-001", "EXT-002"})
+
+    def test_products_filters_search_and_category(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(f"{self.url}?search=EXT-001&category=top")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["external_id"], "EXT-001")
+
+    def test_products_filters_is_active_and_stock_status(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(
+            f"{self.url}?is_active=true&stock_status=in_stock"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["external_id"], "EXT-001")
+
+    def test_products_pagination(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(f"{self.url}?page_size=1")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["page_size"], 1)
+        self.assertEqual(len(response.data["results"]), 1)
+
+    def test_products_ordering(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(f"{self.url}?ordering=name")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        names = [item["name"] for item in response.data["results"]]
+        self.assertEqual(names, sorted(names))
