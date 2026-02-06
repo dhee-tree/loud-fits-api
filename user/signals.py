@@ -6,8 +6,8 @@ from user_profile.models import Profile
 
 @receiver(post_save, sender=User)
 def create_user_profile(sender, instance, created, **kwargs):
-    """Automatically create a Profile when a new User is created."""
-    if created:
+    """Automatically create a Profile when a new User is created (except superusers)."""
+    if created and not instance.is_superuser:
         Profile.objects.create(user=instance)
 
 
