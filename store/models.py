@@ -4,7 +4,7 @@ from django.conf import settings
 
 
 class Store(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    uuid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -22,8 +22,8 @@ class Store(models.Model):
     def __str__(self):
         return self.name
 
-    def get_id(self):
-        return self.id
+    def get_uuid(self):
+        return self.uuid
 
     def get_owner(self):
         return self.owner

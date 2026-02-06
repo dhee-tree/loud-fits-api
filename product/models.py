@@ -18,7 +18,7 @@ class StockStatus(models.TextChoices):
 class Product(models.Model):
     LOW_STOCK_THRESHOLD = 10
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    uuid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     store = models.ForeignKey(
         Store,
         on_delete=models.CASCADE,
@@ -71,7 +71,7 @@ class Product(models.Model):
 
 
 class ProductImportBatch(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    uuid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     store = models.ForeignKey(
         Store,
         on_delete=models.CASCADE,

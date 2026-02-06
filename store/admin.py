@@ -9,4 +9,4 @@ class StoreAdmin(admin.ModelAdmin):
     list_filter = ['created_at']
     search_fields = ['name', 'slug', 'owner__email']
     prepopulated_fields = {'slug': ('name',)}
-    readonly_fields = ['id', 'created_at', 'updated_at']
+    readonly_fields = ['uuid', 'created_at', 'updated_at']
