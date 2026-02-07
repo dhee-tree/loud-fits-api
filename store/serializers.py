@@ -1,7 +1,9 @@
 from rest_framework import serializers
 from django.core.validators import URLValidator
 from django.core.exceptions import ValidationError as DjangoValidationError
-from product.models import CategoryChoices
+from django.utils.text import slugify
+from product.models import CategoryChoices, ProductImportBatch
+from .models import Store
 
 
 class FeedUploadSerializer(serializers.Serializer):
@@ -21,6 +23,37 @@ class FeedUploadSerializer(serializers.Serializer):
         return value
 
 
+def parse_stock_quantity(value):
+    if isinstance(value, bool):
+        raise ValueError("Stock quantity must be a number.")
+    if isinstance(value, int):
+        quantity = value
+    elif isinstance(value, float):
+        if not value.is_integer():
+            raise ValueError("Stock quantity must be a whole number.")
+        quantity = int(value)
+    elif isinstance(value, str):
+        stripped = value.strip()
+        if stripped == "":
+            raise ValueError("Stock quantity cannot be blank.")
+        if stripped.isdigit():
+            quantity = int(stripped)
+        else:
+            try:
+                float_value = float(stripped)
+            except ValueError as exc:
+                raise ValueError("Stock quantity must be a number.") from exc
+            if not float_value.is_integer():
+                raise ValueError("Stock quantity must be a whole number.")
+            quantity = int(float_value)
+    else:
+        raise ValueError("Stock quantity must be a number.")
+
+    if quantity < 0:
+        raise ValueError("Stock quantity cannot be negative.")
+    return quantity
+
+
 def validate_feed_products(products: list) -> dict:
     """
     Validate a list of product dictionaries and return structured results.
@@ -35,13 +68,37 @@ def validate_feed_products(products: list) -> dict:
     seen_ids = {}
     duplicates = []
 
-    required_fields = ['external_id', 'name', 'category',
-                       'image_url', 'price', 'currency', 'product_url']
+    required_fields = [
+        'external_id',
+        'name',
+        'category',
+        'image_url',
+        'price',
+        'currency',
+        'product_url',
+        'stock_quantity',
+    ]
     valid_categories = [choice[0] for choice in CategoryChoices.choices]
+    missing_stock_quantity_count = 0
 
     for index, product in enumerate(products):
         product_errors = []
         product_id = product.get('external_id', f'unknown_at_index_{index}')
+        has_stock_quantity = 'stock_quantity' in product and product.get(
+            'stock_quantity') not in [None, '']
+        stock_quantity = None
+
+        if not has_stock_quantity:
+            missing_stock_quantity_count += 1
+        else:
+            try:
+                stock_quantity = parse_stock_quantity(
+                    product.get('stock_quantity'))
+            except ValueError as exc:
+                product_errors.append({
+                    'field': 'stock_quantity',
+                    'error': str(exc)
+                })
 
         # Check for required fields
         for field in required_fields:
@@ -124,7 +181,7 @@ def validate_feed_products(products: list) -> dict:
                 'errors': product_errors
             })
         else:
-            valid_products.append({
+            valid_product = {
                 'external_id': product['external_id'],
                 'name': product['name'],
                 'category': product['category'],
@@ -132,7 +189,10 @@ def validate_feed_products(products: list) -> dict:
                 'price': product['price'],
                 'currency': product['currency'],
                 'product_url': product['product_url'],
-            })
+            }
+            if has_stock_quantity:
+                valid_product['stock_quantity'] = stock_quantity
+            valid_products.append(valid_product)
             # Count by category
             category = product['category']
             counts_by_category[category] = counts_by_category.get(
@@ -146,4 +206,65 @@ def validate_feed_products(products: list) -> dict:
         'total': len(products),
         'valid_count': len(valid_products),
         'failed_count': len(errors),
+        'missing_stock_quantity_count': missing_stock_quantity_count,
     }
+
+
+class StoreManageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Store
+        fields = [
+            'uuid',
+            'name',
+            'slug',
+            'created_at',
+            'updated_at',
+            'feed_last_uploaded_at',
+        ]
+        read_only_fields = [
+            'uuid',
+            'slug',
+            'created_at',
+            'updated_at',
+            'feed_last_uploaded_at',
+        ]
+
+    def validate_name(self, value):
+        slug = slugify(value)
+        queryset = Store.objects.filter(slug=slug)
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError(
+                "A store with this name already exists.")
+        return value
+
+    def create(self, validated_data):
+        name = validated_data['name']
+        store = Store.objects.create(
+            slug=slugify(name),
+            **validated_data,
+        )
+        return store
+
+    def update(self, instance, validated_data):
+        name = validated_data.get('name', instance.name)
+        instance.name = name
+        instance.slug = slugify(name)
+        instance.save(update_fields=['name', 'slug', 'updated_at'])
+        return instance
+
+
+class StoreLastImportSerializer(serializers.ModelSerializer):
+    batch_id = serializers.UUIDField(source='uuid', read_only=True)
+
+    class Meta:
+        model = ProductImportBatch
+        fields = [
+            'batch_id',
+            'created_at',
+            'total',
+            'imported',
+            'updated',
+            'failed',
+        ]

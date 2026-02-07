@@ -11,9 +11,19 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from api_common.pagination import Paginator
 from .filters import StoreProductFilter
 from .permissions import IsStoreOwner
-from .serializers import FeedUploadSerializer, validate_feed_products
+from .serializers import (
+    FeedUploadSerializer,
+    validate_feed_products,
+    StoreManageSerializer,
+    StoreLastImportSerializer,
+)
 from product.models import Product, ProductImportBatch
-from product.serializers import ProductListSerializer
+from product.serializers import (
+    ProductListSerializer,
+    ProductDetailSerializer,
+    ProductUpdateSerializer,
+)
+from user.models import User
 
 
 class StoreProductListView(generics.ListAPIView):
@@ -33,6 +43,54 @@ class StoreProductListView(generics.ListAPIView):
 
     def get_queryset(self):
         return Product.objects.filter(store=self.request.user.store)
+
+
+class StoreProductDetailView(APIView):
+    """
+    GET /api/store/products/<uuid>/
+    PATCH /api/store/products/<uuid>/
+    """
+    permission_classes = [IsAuthenticated, IsStoreOwner]
+
+    def get_object(self, request, product_uuid):
+        return Product.objects.get(
+            uuid=product_uuid,
+            store=request.user.store,
+        )
+
+    def get(self, request, product_uuid):
+        try:
+            product = self.get_object(request, product_uuid)
+        except Product.DoesNotExist:
+            return Response(
+                {"detail": "Product not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = ProductDetailSerializer(product)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def patch(self, request, product_uuid):
+        try:
+            product = self.get_object(request, product_uuid)
+        except Product.DoesNotExist:
+            return Response(
+                {"detail": "Product not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = ProductUpdateSerializer(
+            product,
+            data=request.data,
+            partial=True,
+            context={"store": request.user.store},
+        )
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        product = serializer.save()
+        response_serializer = ProductDetailSerializer(product)
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
 
 
 class FeedPreviewView(APIView):
@@ -76,8 +134,18 @@ class FeedPreviewView(APIView):
         validation_result = validate_feed_products(products)
 
         # Build preview response
-        is_valid = validation_result['failed_count'] == 0
+        is_valid = validation_result['valid_count'] > 0
         sample_products = validation_result['valid_products'][:5]
+        missing_stock_quantity_count = validation_result.get(
+            'missing_stock_quantity_count',
+            0,
+        )
+        missing_stock_quantity_message = (
+            f"{missing_stock_quantity_count} product(s) are missing stock quantity. "
+            "These will default to out of stock."
+            if missing_stock_quantity_count > 0
+            else None
+        )
 
         return Response({
             'is_valid': is_valid,
@@ -85,6 +153,8 @@ class FeedPreviewView(APIView):
             'valid_count': validation_result['valid_count'],
             'failed_count': validation_result['failed_count'],
             'counts_by_category': validation_result['counts_by_category'],
+            'missing_stock_quantity_count': missing_stock_quantity_count,
+            'missing_stock_quantity_message': missing_stock_quantity_message,
             'sample_products': sample_products,
             'errors': validation_result['errors'],
         }, status=status.HTTP_200_OK)
@@ -133,6 +203,13 @@ class FeedImportView(APIView):
         products = serializer.validated_data['products']
         validation_result = validate_feed_products(products)
 
+        if validation_result['valid_count'] == 0:
+            return Response({
+                'error': 'No valid products to import.',
+                'failed_count': validation_result['failed_count'],
+                'errors': validation_result['errors'],
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         # Create import batch record
         batch = ProductImportBatch.objects.create(
             store=store,
@@ -147,6 +224,11 @@ class FeedImportView(APIView):
         # Upsert valid products
         for product_data in validation_result['valid_products']:
             external_id = product_data['external_id']
+            stock_quantity = product_data.get('stock_quantity', None)
+            if stock_quantity is not None:
+                product_data['stock_status'] = Product(
+                    stock_quantity=stock_quantity
+                ).calculate_stock_status()
 
             existing_product = Product.objects.filter(
                 store=store,
@@ -185,3 +267,96 @@ class FeedImportView(APIView):
             'failed': validation_result['failed_count'],
             'errors': validation_result['errors'],
         }, status=status.HTTP_201_CREATED)
+
+
+class StoreManageView(APIView):
+    """
+    GET /api/store/manage/
+    POST /api/store/manage/
+    PATCH /api/store/manage/
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if hasattr(request.user, 'store'):
+            serializer = StoreManageSerializer(request.user.store)
+            return Response({
+                'has_store': True,
+                'store': serializer.data,
+            }, status=status.HTTP_200_OK)
+
+        return Response({
+            'has_store': False,
+            'store': None,
+        }, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        if hasattr(request.user, 'store'):
+            return Response(
+                {'error': 'Store already exists for this account.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        serializer = StoreManageSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {'error': 'Invalid store details', 'details': serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        store = serializer.save(owner=request.user)
+
+        if request.user.account_type != User.AccountType.STORE:
+            request.user.account_type = User.AccountType.STORE
+            request.user.save(update_fields=['account_type'])
+
+        return Response({
+            'has_store': True,
+            'store': StoreManageSerializer(store).data,
+        }, status=status.HTTP_201_CREATED)
+
+    def patch(self, request):
+        if not hasattr(request.user, 'store'):
+            return Response(
+                {'error': 'Store not found for this account.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        store = request.user.store
+        serializer = StoreManageSerializer(store, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(
+                {'error': 'Invalid store details', 'details': serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        store = serializer.save()
+
+        return Response({
+            'has_store': True,
+            'store': StoreManageSerializer(store).data,
+        }, status=status.HTTP_200_OK)
+
+
+class StoreLastImportView(APIView):
+    """
+    GET /api/store/imports/last/
+    """
+    permission_classes = [IsAuthenticated, IsStoreOwner]
+
+    def get(self, request):
+        last_import = ProductImportBatch.objects.filter(
+            store=request.user.store
+        ).first()
+
+        if not last_import:
+            return Response({
+                'has_import': False,
+                'import': None,
+            }, status=status.HTTP_200_OK)
+
+        serializer = StoreLastImportSerializer(last_import)
+        return Response({
+            'has_import': True,
+            'import': serializer.data,
+        }, status=status.HTTP_200_OK)
