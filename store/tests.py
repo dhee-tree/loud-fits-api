@@ -763,6 +763,31 @@ class StoreProductDetailTests(StoreTestCase):
 class StoreManageTests(StoreTestCase):
     """Tests for the store manage endpoint."""
 
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        base_test_media_root = Path(settings.BASE_DIR) / "tests" / "stores"
+        base_test_media_root.mkdir(parents=True, exist_ok=True)
+        cls._test_media_root = base_test_media_root / f"store-{uuid.uuid4().hex}"
+        cls._test_media_root.mkdir(parents=True, exist_ok=True)
+        cls._settings_override = override_settings(
+            STORAGES={
+                "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+                "staticfiles": {
+                    "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+                },
+            },
+            MEDIA_ROOT=str(cls._test_media_root),
+            MEDIA_URL="/media/",
+        )
+        cls._settings_override.enable()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._settings_override.disable()
+        shutil.rmtree(cls._test_media_root, ignore_errors=True)
+        super().tearDownClass()
+
     def setUp(self):
         super().setUp()
         self.url = "/api/store/manage/"
