@@ -1,11 +1,12 @@
 import json
 from django.utils import timezone
+from botocore.exceptions import BotoCoreError, ClientError
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status, generics
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.parsers import MultiPartParser, JSONParser
+from rest_framework.parsers import MultiPartParser, JSONParser, FormParser
 from rest_framework.filters import SearchFilter, OrderingFilter
 
 from api_common.pagination import Paginator
@@ -224,11 +225,10 @@ class FeedImportView(APIView):
         # Upsert valid products
         for product_data in validation_result['valid_products']:
             external_id = product_data['external_id']
-            stock_quantity = product_data.get('stock_quantity', None)
-            if stock_quantity is not None:
-                product_data['stock_status'] = Product(
-                    stock_quantity=stock_quantity
-                ).calculate_stock_status()
+            stock_quantity = product_data.get('stock_quantity')
+            product_data['stock_status'] = Product(
+                stock_quantity=stock_quantity
+            ).calculate_stock_status()
 
             existing_product = Product.objects.filter(
                 store=store,
@@ -276,10 +276,14 @@ class StoreManageView(APIView):
     PATCH /api/store/manage/
     """
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get(self, request):
         if hasattr(request.user, 'store'):
-            serializer = StoreManageSerializer(request.user.store)
+            serializer = StoreManageSerializer(
+                request.user.store,
+                context={'request': request},
+            )
             return Response({
                 'has_store': True,
                 'store': serializer.data,
@@ -297,7 +301,10 @@ class StoreManageView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        serializer = StoreManageSerializer(data=request.data)
+        serializer = StoreManageSerializer(
+            data=request.data,
+            context={'request': request},
+        )
         if not serializer.is_valid():
             return Response(
                 {'error': 'Invalid store details', 'details': serializer.errors},
@@ -312,10 +319,20 @@ class StoreManageView(APIView):
 
         return Response({
             'has_store': True,
-            'store': StoreManageSerializer(store).data,
+            'store': StoreManageSerializer(
+                store,
+                context={'request': request},
+            ).data,
         }, status=status.HTTP_201_CREATED)
 
     def patch(self, request):
+        if 'logo' in request.data:
+            if request.user.account_type != User.AccountType.STORE:
+                return Response(
+                    {"detail": "You must be a store owner to access this resource."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
         if not hasattr(request.user, 'store'):
             return Response(
                 {'error': 'Store not found for this account.'},
@@ -323,18 +340,35 @@ class StoreManageView(APIView):
             )
 
         store = request.user.store
-        serializer = StoreManageSerializer(store, data=request.data, partial=True)
+        serializer = StoreManageSerializer(
+            store,
+            data=request.data,
+            partial=True,
+            context={'request': request},
+        )
         if not serializer.is_valid():
             return Response(
                 {'error': 'Invalid store details', 'details': serializer.errors},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        store = serializer.save()
+        try:
+            store = serializer.save()
+        except (ClientError, BotoCoreError, OSError) as exc:
+            return Response(
+                {
+                    'error': 'Unable to upload logo due to storage configuration.',
+                    'details': {'logo': [str(exc)]},
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
 
         return Response({
             'has_store': True,
-            'store': StoreManageSerializer(store).data,
+            'store': StoreManageSerializer(
+                store,
+                context={'request': request},
+            ).data,
         }, status=status.HTTP_200_OK)
 
 

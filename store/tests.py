@@ -1,8 +1,14 @@
 import json
+import shutil
+import uuid
 from io import BytesIO
-from django.test import TestCase
+from pathlib import Path
+from django.test import TestCase, override_settings
+from django.conf import settings
+from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
 from rest_framework import status
+from PIL import Image
 from user.models import User
 from store.models import Store
 from product.models import Product, ProductImportBatch, StockStatus
@@ -69,6 +75,23 @@ class StoreTestCase(TestCase):
             ]
         }
 
+    def create_logo_file(
+        self,
+        filename='logo.png',
+        image_format='PNG',
+        content_type='image/png',
+        size=(10, 10),
+    ):
+        image_io = BytesIO()
+        image = Image.new('RGB', size=size, color=(0, 128, 255))
+        image.save(image_io, format=image_format)
+        image_io.seek(0)
+        return SimpleUploadedFile(
+            filename,
+            image_io.read(),
+            content_type=content_type,
+        )
+
 
 class FeedPreviewTests(StoreTestCase):
     """Tests for the feed preview endpoint."""
@@ -112,7 +135,7 @@ class FeedPreviewTests(StoreTestCase):
         self.assertIsNone(response.data['missing_stock_quantity_message'])
 
     def test_preview_warns_on_missing_stock_quantity(self):
-        """Test preview returns a warning when stock quantity is missing."""
+        """Test preview flags missing stock quantity as invalid with warning metadata."""
         self.client.force_authenticate(user=self.user)
 
         feed = {
@@ -130,9 +153,13 @@ class FeedPreviewTests(StoreTestCase):
         response = self.client.post(self.url, feed, format='json')
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertTrue(response.data['is_valid'])
+        self.assertFalse(response.data['is_valid'])
+        self.assertEqual(response.data['valid_count'], 0)
+        self.assertEqual(response.data['failed_count'], 1)
         self.assertEqual(response.data['missing_stock_quantity_count'], 1)
         self.assertIsNotNone(response.data['missing_stock_quantity_message'])
+        error_fields = [e['field'] for e in response.data['errors'][0]['errors']]
+        self.assertIn('stock_quantity', error_fields)
 
     def test_preview_with_invalid_category(self):
         """Test preview catches invalid category values."""
@@ -216,7 +243,8 @@ class FeedPreviewTests(StoreTestCase):
                     'image_url': 'https://example.com/img1.jpg',
                     'price': 10.00,
                     'currency': 'GBP',
-                    'product_url': 'https://example.com/prod1'
+                    'product_url': 'https://example.com/prod1',
+                    'stock_quantity': 8,
                 },
                 {
                     'external_id': 'PROD001',  # Duplicate ID
@@ -225,7 +253,8 @@ class FeedPreviewTests(StoreTestCase):
                     'image_url': 'https://example.com/img2.jpg',
                     'price': 20.00,
                     'currency': 'GBP',
-                    'product_url': 'https://example.com/prod2'
+                    'product_url': 'https://example.com/prod2',
+                    'stock_quantity': 4,
                 }
             ]
         }
@@ -424,7 +453,8 @@ class FeedImportTests(StoreTestCase):
                     'image_url': 'https://example.com/image.jpg',
                     'price': 10.00,
                     'currency': 'GBP',
-                    'product_url': 'https://example.com/product'
+                    'product_url': 'https://example.com/product',
+                    'stock_quantity': 11,
                 },
                 {
                     'external_id': 'PROD002',
@@ -838,6 +868,74 @@ class StoreManageTests(StoreTestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("name", response.data["details"])
+
+    def test_manage_patch_logo_requires_store_account(self):
+        user = self.create_regular_user()
+        self.client.force_authenticate(user=user)
+
+        response = self.client.patch(
+            self.url,
+            {'logo': self.create_logo_file()},
+            format='multipart',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_manage_patch_logo_success(self):
+        user, store = self.create_store_user()
+        self.client.force_authenticate(user=user)
+
+        response = self.client.patch(
+            self.url,
+            {'logo': self.create_logo_file()},
+            format='multipart',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['has_store'])
+        self.assertIsNotNone(response.data['store']['logo_url'])
+        self.assertTrue(response.data['store']['logo_url'].startswith('http'))
+
+        store.refresh_from_db()
+        self.assertTrue(store.logo.name.startswith(f'stores/{store.uuid}/logo/'))
+
+    def test_manage_patch_logo_rejects_invalid_file_type(self):
+        user, _ = self.create_store_user()
+        self.client.force_authenticate(user=user)
+
+        invalid_file = SimpleUploadedFile(
+            'logo.txt',
+            b'invalid-content',
+            content_type='text/plain',
+        )
+
+        response = self.client.patch(
+            self.url,
+            {'logo': invalid_file},
+            format='multipart',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('logo', response.data['details'])
+
+    def test_manage_patch_logo_rejects_large_file(self):
+        user, _ = self.create_store_user()
+        self.client.force_authenticate(user=user)
+
+        oversized_file = SimpleUploadedFile(
+            'logo.png',
+            b'a' * (2 * 1024 * 1024 + 1),
+            content_type='image/png',
+        )
+
+        response = self.client.patch(
+            self.url,
+            {'logo': oversized_file},
+            format='multipart',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('logo', response.data['details'])
 
 
 class StoreLastImportTests(StoreTestCase):

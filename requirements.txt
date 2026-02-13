@@ -8,8 +8,10 @@ coverage==7.13.2
 cyclonedx-python-lib==11.6.0
 defusedxml==0.7.1
 Django==6.0
+boto3==1.40.74
 django-cors-headers==4.9.0
 django-filter==25.2
+django-storages==1.14.6
 djangorestframework==3.16.1
 djangorestframework_simplejwt==5.5.1
 filelock==3.20.3
@@ -22,6 +24,7 @@ mdurl==0.1.2
 msgpack==1.1.2
 packageurl-python==0.17.6
 packaging==25.0
+Pillow==11.3.0
 pip-api==0.0.34
 pip-requirements-parser==32.0.1
 pip_audit==2.10.0

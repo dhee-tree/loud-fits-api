@@ -1,6 +1,14 @@
 import uuid
+from pathlib import Path
 from django.db import models
 from django.conf import settings
+
+
+def store_logo_upload_to(instance, filename):
+    extension = Path(filename).suffix.lower().lstrip('.')
+    if extension not in {'png', 'jpg', 'jpeg', 'webp'}:
+        extension = 'png'
+    return f"stores/{instance.uuid}/logo/{uuid.uuid4()}.{extension}"
 
 
 class Store(models.Model):
@@ -15,6 +23,11 @@ class Store(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     feed_last_uploaded_at = models.DateTimeField(null=True, blank=True)
+    logo = models.ImageField(
+        upload_to=store_logo_upload_to,
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         ordering = ['-created_at']

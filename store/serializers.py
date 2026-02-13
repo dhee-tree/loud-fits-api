@@ -1,9 +1,14 @@
+from PIL import Image, UnidentifiedImageError
 from rest_framework import serializers
 from django.core.validators import URLValidator
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils.text import slugify
 from product.models import CategoryChoices, ProductImportBatch
 from .models import Store
+
+MAX_LOGO_FILE_SIZE = 2 * 1024 * 1024
+ALLOWED_LOGO_CONTENT_TYPES = {"image/png", "image/jpeg", "image/webp"}
+ALLOWED_LOGO_FORMATS = {"PNG", "JPEG", "WEBP"}
 
 
 class FeedUploadSerializer(serializers.Serializer):
@@ -189,9 +194,8 @@ def validate_feed_products(products: list) -> dict:
                 'price': product['price'],
                 'currency': product['currency'],
                 'product_url': product['product_url'],
+                'stock_quantity': stock_quantity,
             }
-            if has_stock_quantity:
-                valid_product['stock_quantity'] = stock_quantity
             valid_products.append(valid_product)
             # Count by category
             category = product['category']
@@ -211,12 +215,17 @@ def validate_feed_products(products: list) -> dict:
 
 
 class StoreManageSerializer(serializers.ModelSerializer):
+    logo = serializers.ImageField(required=False, allow_null=True, write_only=True)
+    logo_url = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = Store
         fields = [
             'uuid',
             'name',
             'slug',
+            'logo',
+            'logo_url',
             'created_at',
             'updated_at',
             'feed_last_uploaded_at',
@@ -224,10 +233,44 @@ class StoreManageSerializer(serializers.ModelSerializer):
         read_only_fields = [
             'uuid',
             'slug',
+            'logo_url',
             'created_at',
             'updated_at',
             'feed_last_uploaded_at',
         ]
+
+    def get_logo_url(self, obj):
+        if not obj.logo:
+            return None
+        request = self.context.get('request')
+        if request is not None:
+            return request.build_absolute_uri(obj.logo.url)
+        return obj.logo.url
+
+    def validate_logo(self, value):
+        if value is None:
+            return value
+
+        if value.size > MAX_LOGO_FILE_SIZE:
+            raise serializers.ValidationError("Logo file size must be 2MB or smaller.")
+
+        content_type = getattr(value, "content_type", "")
+        if content_type and content_type.lower() not in ALLOWED_LOGO_CONTENT_TYPES:
+            raise serializers.ValidationError("Unsupported file type. Allowed formats: PNG, JPG, JPEG, WEBP.")
+
+        try:
+            image = Image.open(value)
+            image.verify()
+            image_format = (image.format or "").upper()
+        except (UnidentifiedImageError, OSError):
+            raise serializers.ValidationError("Invalid image file.")
+        finally:
+            value.seek(0)
+
+        if image_format not in ALLOWED_LOGO_FORMATS:
+            raise serializers.ValidationError("Unsupported file type. Allowed formats: PNG, JPG, JPEG, WEBP.")
+
+        return value
 
     def validate_name(self, value):
         slug = slugify(value)
@@ -248,10 +291,24 @@ class StoreManageSerializer(serializers.ModelSerializer):
         return store
 
     def update(self, instance, validated_data):
+        old_logo_name = instance.logo.name if instance.logo else None
         name = validated_data.get('name', instance.name)
         instance.name = name
         instance.slug = slugify(name)
-        instance.save(update_fields=['name', 'slug', 'updated_at'])
+
+        logo_was_updated = 'logo' in validated_data
+        if logo_was_updated:
+            instance.logo = validated_data.get('logo')
+
+        update_fields = ['name', 'slug', 'updated_at']
+        if logo_was_updated:
+            update_fields.append('logo')
+
+        instance.save(update_fields=update_fields)
+
+        if logo_was_updated and old_logo_name and old_logo_name != instance.logo.name:
+            instance.logo.storage.delete(old_logo_name)
+
         return instance
 
 

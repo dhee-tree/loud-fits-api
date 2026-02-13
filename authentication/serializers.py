@@ -46,8 +46,12 @@ class StoreRegisterSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, min_length=8)
     store_name = serializers.CharField(max_length=255)
-    first_name = serializers.CharField(max_length=150)
-    last_name = serializers.CharField(max_length=150)
+    first_name = serializers.CharField(
+        max_length=150, required=False, allow_blank=True, default=""
+    )
+    last_name = serializers.CharField(
+        max_length=150, required=False, allow_blank=True, default=""
+    )
 
     def validate_email(self, value):
         if User.objects.filter(email=value).exists():
@@ -65,8 +69,8 @@ class StoreRegisterSerializer(serializers.Serializer):
         email = validated_data['email']
         password = validated_data['password']
         store_name = validated_data['store_name']
-        first_name = validated_data['first_name']
-        last_name = validated_data['last_name']
+        first_name = validated_data.get('first_name', '')
+        last_name = validated_data.get('last_name', '')
 
         # Create user with account_type=STORE
         user = User(
