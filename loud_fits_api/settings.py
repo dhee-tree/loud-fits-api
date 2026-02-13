@@ -10,14 +10,18 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+from datetime import timedelta
+import logging
 import os
 from pathlib import Path
+
 from decouple import config
-from datetime import timedelta
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = os.path.join(BASE_DIR, 'static')
+logger = logging.getLogger(__name__)
 
 
 # Quick-start development settings - unsuitable for production
@@ -135,6 +139,68 @@ USE_TZ = True
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATIC_URL = 'static/'
 STATICFILES_DIRS = [STATIC_DIR]
+MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_URL = '/media/'
+
+STORAGES = {
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+}
+
+AWS_S3_ENABLED = config('AWS_S3_ENABLED', default=False, cast=bool)
+
+if AWS_S3_ENABLED:
+    required_aws_settings = {
+        'AWS_ACCESS_KEY_ID': config('AWS_ACCESS_KEY_ID', default='', cast=str).strip(),
+        'AWS_SECRET_ACCESS_KEY': config('AWS_SECRET_ACCESS_KEY', default='', cast=str).strip(),
+        'AWS_REGION': config('AWS_REGION', default='', cast=str).strip(),
+        'AWS_S3_MEDIA_BUCKET_NAME': config('AWS_S3_MEDIA_BUCKET_NAME', default='', cast=str).strip(),
+    }
+    missing_aws_settings = [
+        setting_name
+        for setting_name, setting_value in required_aws_settings.items()
+        if not setting_value
+    ]
+
+    if missing_aws_settings:
+        missing_message = (
+            'AWS_S3_ENABLED=true but missing required AWS settings: '
+            f'{", ".join(missing_aws_settings)}'
+        )
+        if DEBUG:
+            logger.warning('%s. Falling back to local media storage.', missing_message)
+        else:
+            raise ImproperlyConfigured(missing_message)
+    else:
+        AWS_ACCESS_KEY_ID = required_aws_settings['AWS_ACCESS_KEY_ID']
+        AWS_SECRET_ACCESS_KEY = required_aws_settings['AWS_SECRET_ACCESS_KEY']
+        AWS_S3_REGION_NAME = required_aws_settings['AWS_REGION']
+        AWS_STORAGE_BUCKET_NAME = required_aws_settings['AWS_S3_MEDIA_BUCKET_NAME']
+        AWS_S3_CUSTOM_DOMAIN = config('AWS_S3_CUSTOM_DOMAIN', default='', cast=str).strip()
+
+        aws_s3_endpoint_url = config('AWS_S3_ENDPOINT_URL', default='', cast=str).strip()
+        AWS_S3_ENDPOINT_URL = aws_s3_endpoint_url or None
+
+        AWS_DEFAULT_ACL = None
+        AWS_QUERYSTRING_AUTH = False
+        AWS_S3_OBJECT_PARAMETERS = {'ServerSideEncryption': 'AES256'}
+
+        STORAGES['default'] = {
+            'BACKEND': 'loud_fits_api.storage_backends.PrivateMediaStorage'
+        }
+
+        if AWS_S3_CUSTOM_DOMAIN:
+            media_domain = AWS_S3_CUSTOM_DOMAIN.rstrip('/')
+            if not media_domain.startswith(('http://', 'https://')):
+                media_domain = f'https://{media_domain}'
+            MEDIA_URL = f'{media_domain}/media/public/'
+        elif AWS_S3_REGION_NAME == 'us-east-1':
+            MEDIA_URL = f'https://{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com/media/public/'
+        else:
+            MEDIA_URL = (
+                f'https://{AWS_STORAGE_BUCKET_NAME}.s3.'
+                f'{AWS_S3_REGION_NAME}.amazonaws.com/media/public/'
+            )
 
 # CSRF settings
 CSRF_TRUSTED_ORIGINS = config("CSRF_TRUSTED_ORIGINS").split(",")
