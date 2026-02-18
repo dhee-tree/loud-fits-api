@@ -138,3 +138,24 @@ class ProductBrowseTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["page_size"], 1)
         self.assertEqual(len(response.data["results"]), 1)
+
+    def test_list_includes_store_summary(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        products_by_external_id = {
+            item["external_id"]: item for item in response.data["results"]
+        }
+        self.assertIn("P-001", products_by_external_id)
+        self.assertIn("store", products_by_external_id["P-001"])
+        self.assertEqual(
+            products_by_external_id["P-001"]["store"]["name"], self.store_one.name
+        )
+        self.assertEqual(
+            products_by_external_id["P-001"]["store"]["slug"], self.store_one.slug
+        )
+        self.assertIn("uuid", products_by_external_id["P-001"]["store"])
+        self.assertEqual(products_by_external_id["P-001"]["currency"], "GBP")
+        self.assertEqual(
+            products_by_external_id["P-001"]["product_url"],
+            "https://example.com/blue",
+        )

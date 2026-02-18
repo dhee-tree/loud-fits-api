@@ -9,6 +9,28 @@ class StoreSummarySerializer(serializers.Serializer):
 
 
 class ProductListSerializer(serializers.ModelSerializer):
+    """
+    Compact product list for store-owner dashboard tables.
+    """
+    class Meta:
+        model = Product
+        fields = [
+            "uuid",
+            "external_id",
+            "name",
+            "category",
+            "image_url",
+            "is_active",
+            "stock_status",
+            "updated_at",
+        ]
+
+
+class ProductBrowseSerializer(serializers.ModelSerializer):
+    """
+    Public browse serializer used by GET /api/products/.
+    Includes store summary for client rendering.
+    """
     store = serializers.SerializerMethodField()
 
     class Meta:
@@ -24,8 +46,6 @@ class ProductListSerializer(serializers.ModelSerializer):
             "product_url",
             "is_active",
             "stock_status",
-            "stock_quantity",
-            "created_at",
             "updated_at",
             "store",
         ]
@@ -36,21 +56,6 @@ class ProductListSerializer(serializers.ModelSerializer):
             "name": obj.store.name,
             "slug": obj.store.slug,
         }
-
-
-class ProductListSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Product
-        fields = [
-            "uuid",
-            "external_id",
-            "name",
-            "category",
-            "image_url",
-            "is_active",
-            "stock_status",
-            "updated_at",
-        ]
 
 
 class ProductDetailSerializer(serializers.ModelSerializer):

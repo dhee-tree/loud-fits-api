@@ -5,7 +5,7 @@ from rest_framework.filters import SearchFilter
 from api_common.pagination import Paginator
 from .filters import ProductBrowseFilter
 from .models import Product, StockStatus
-from .serializers import ProductListSerializer
+from .serializers import ProductBrowseSerializer
 
 
 class ProductListView(generics.ListAPIView):
@@ -15,7 +15,7 @@ class ProductListView(generics.ListAPIView):
     Public product browse endpoint.
     """
     permission_classes = [permissions.AllowAny]
-    serializer_class = ProductListSerializer
+    serializer_class = ProductBrowseSerializer
     pagination_class = Paginator
     filter_backends = [DjangoFilterBackend, SearchFilter]
     filterset_class = ProductBrowseFilter
