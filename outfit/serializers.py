@@ -4,6 +4,23 @@ from product.models import Product
 from .models import Outfit, OutfitItem
 
 
+def get_creator_display_name(user):
+    full_name = f"{user.first_name} {user.last_name}".strip()
+    if full_name:
+        return full_name
+    if user.username:
+        return user.username
+    if user.email:
+        return user.email.split('@')[0]
+    return 'User'
+
+
+class OutfitCreatorSerializer(serializers.Serializer):
+    uuid = serializers.UUIDField()
+    username = serializers.CharField()
+    display_name = serializers.CharField()
+
+
 class OutfitItemSerializer(serializers.ModelSerializer):
     product_id = serializers.UUIDField(source='product.uuid', read_only=True)
 
@@ -24,19 +41,67 @@ class OutfitItemSerializer(serializers.ModelSerializer):
 
 class OutfitDetailSerializer(serializers.ModelSerializer):
     items = OutfitItemSerializer(many=True, read_only=True)
+    creator = serializers.SerializerMethodField()
 
     class Meta:
         model = Outfit
         fields = [
             'uuid',
+            'creator',
             'status',
             'title',
             'notes',
             'created_at',
             'updated_at',
             'published_at',
+            'is_hidden',
+            'hidden_reason',
             'items',
         ]
+
+    def get_creator(self, obj):
+        return {
+            'uuid': obj.owner.uuid,
+            'username': obj.owner.username,
+            'display_name': get_creator_display_name(obj.owner),
+        }
+
+
+class ExploreOutfitSerializer(serializers.ModelSerializer):
+    creator = serializers.SerializerMethodField()
+    top_image_url = serializers.SerializerMethodField()
+    bottom_image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Outfit
+        fields = [
+            'uuid',
+            'title',
+            'published_at',
+            'creator',
+            'top_image_url',
+            'bottom_image_url',
+        ]
+
+    def get_creator(self, obj):
+        return {
+            'uuid': obj.owner.uuid,
+            'username': obj.owner.username,
+            'display_name': get_creator_display_name(obj.owner),
+        }
+
+    @staticmethod
+    def get_slot_image(obj, slot):
+        for item in obj.items.all():
+            if item.slot == slot:
+                return item.image_url_used
+        return None
+
+    def get_top_image_url(self, obj):
+        return self.get_slot_image(obj, OutfitItem.Slot.TOP)
+
+    def get_bottom_image_url(self, obj):
+        return self.get_slot_image(obj, OutfitItem.Slot.BOTTOM)
 
 
 class OutfitCreateSerializer(serializers.ModelSerializer):
@@ -94,4 +159,30 @@ class OutfitSlotSetSerializer(serializers.Serializer):
             })
 
         attrs['product'] = product
+        return attrs
+
+
+class OutfitModerationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Outfit
+        fields = ['is_hidden', 'hidden_reason']
+        extra_kwargs = {
+            'is_hidden': {'required': True},
+            'hidden_reason': {'required': False, 'allow_blank': True, 'allow_null': True},
+        }
+
+    def validate(self, attrs):
+        is_hidden = attrs.get('is_hidden', getattr(self.instance, 'is_hidden', False))
+        hidden_reason = attrs.get('hidden_reason', getattr(self.instance, 'hidden_reason', None))
+
+        if not is_hidden:
+            attrs['hidden_reason'] = None
+            return attrs
+
+        if hidden_reason is None:
+            return attrs
+
+        if isinstance(hidden_reason, str):
+            cleaned = hidden_reason.strip()
+            attrs['hidden_reason'] = cleaned or None
         return attrs

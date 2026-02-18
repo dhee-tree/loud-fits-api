@@ -1,3 +1,4 @@
+from django.utils import timezone
 from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APIClient
@@ -21,6 +22,13 @@ class OutfitApiTests(TestCase):
             email='other@example.com',
             password='testpass123',
             account_type=User.AccountType.USER,
+        )
+        self.admin_user = User.objects.create_user(
+            email='admin@example.com',
+            password='testpass123',
+            role=User.Role.ADMIN,
+            account_type=User.AccountType.USER,
+            is_staff=True,
         )
 
         self.store_owner_one = User.objects.create_user(
@@ -99,7 +107,13 @@ class OutfitApiTests(TestCase):
 
     @staticmethod
     def create_outfit(owner, status_value=Outfit.Status.DRAFT, title=''):
-        return Outfit.objects.create(owner=owner, status=status_value, title=title)
+        published_at = timezone.now() if status_value == Outfit.Status.PUBLISHED else None
+        return Outfit.objects.create(
+            owner=owner,
+            status=status_value,
+            title=title,
+            published_at=published_at,
+        )
 
     @staticmethod
     def create_outfit_item(outfit, slot, product):
@@ -191,7 +205,7 @@ class OutfitApiTests(TestCase):
             self.user, status_value=Outfit.Status.DRAFT, title='Private Draft')
 
         response = self.client.get(f'/api/outfits/{draft.uuid}/')
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
         self.client.force_authenticate(user=self.other_user)
         response = self.client.get(f'/api/outfits/{draft.uuid}/')
@@ -202,7 +216,7 @@ class OutfitApiTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['uuid'], str(draft.uuid))
 
-    def test_retrieve_published_is_public(self):
+    def test_retrieve_published_requires_authentication(self):
         published = self.create_outfit(
             self.user,
             status_value=Outfit.Status.PUBLISHED,
@@ -212,7 +226,10 @@ class OutfitApiTests(TestCase):
             published, OutfitItem.Slot.TOP, self.top_product)
 
         response = self.client.get(f'/api/outfits/{published.uuid}/')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
+        self.client.force_authenticate(user=self.other_user)
+        response = self.client.get(f'/api/outfits/{published.uuid}/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['uuid'], str(published.uuid))
         self.assertEqual(len(response.data['items']), 1)
@@ -360,3 +377,186 @@ class OutfitApiTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('slot', response.data)
+
+    def test_publish_requires_authentication(self):
+        draft = self.create_outfit(self.user, status_value=Outfit.Status.DRAFT)
+        response = self.client.post(f'/api/outfits/{draft.uuid}/publish/')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_publish_requires_owner(self):
+        draft = self.create_outfit(self.user, status_value=Outfit.Status.DRAFT)
+        self.client.force_authenticate(user=self.other_user)
+        response = self.client.post(f'/api/outfits/{draft.uuid}/publish/')
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_publish_requires_both_top_and_bottom(self):
+        draft = self.create_outfit(self.user, status_value=Outfit.Status.DRAFT)
+        self.create_outfit_item(draft, OutfitItem.Slot.TOP, self.top_product)
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(f'/api/outfits/{draft.uuid}/publish/')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('slots', response.data)
+
+    def test_publish_success_sets_status_and_published_at(self):
+        draft = self.create_outfit(self.user, status_value=Outfit.Status.DRAFT)
+        self.create_outfit_item(draft, OutfitItem.Slot.TOP, self.top_product)
+        self.create_outfit_item(draft, OutfitItem.Slot.BOTTOM, self.bottom_product)
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(f'/api/outfits/{draft.uuid}/publish/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        draft.refresh_from_db()
+        self.assertEqual(draft.status, Outfit.Status.PUBLISHED)
+        self.assertIsNotNone(draft.published_at)
+        self.assertIn('creator', response.data)
+        self.assertEqual(str(response.data['creator']['uuid']), str(self.user.uuid))
+
+    def test_publish_is_idempotent(self):
+        published = self.create_outfit(self.user, status_value=Outfit.Status.PUBLISHED)
+        self.create_outfit_item(published, OutfitItem.Slot.TOP, self.top_product)
+        self.create_outfit_item(published, OutfitItem.Slot.BOTTOM, self.bottom_product)
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(f'/api/outfits/{published.uuid}/publish/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        published.refresh_from_db()
+        self.assertEqual(published.status, Outfit.Status.PUBLISHED)
+
+    def test_explore_requires_authentication(self):
+        response = self.client.get('/api/explore/outfits/')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_explore_returns_only_visible_published(self):
+        hidden_published = self.create_outfit(
+            self.other_user,
+            status_value=Outfit.Status.PUBLISHED,
+            title='Hidden Fit',
+        )
+        hidden_published.is_hidden = True
+        hidden_published.save(update_fields=['is_hidden'])
+        self.create_outfit_item(hidden_published, OutfitItem.Slot.TOP, self.top_product)
+        self.create_outfit_item(hidden_published, OutfitItem.Slot.BOTTOM, self.bottom_product)
+
+        public_published = self.create_outfit(
+            self.other_user,
+            status_value=Outfit.Status.PUBLISHED,
+            title='Public Fit',
+        )
+        self.create_outfit_item(public_published, OutfitItem.Slot.TOP, self.top_product)
+        self.create_outfit_item(public_published, OutfitItem.Slot.BOTTOM, self.bottom_product)
+
+        self.create_outfit(self.other_user, status_value=Outfit.Status.DRAFT, title='Draft Fit')
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get('/api/explore/outfits/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+        result = response.data['results'][0]
+        self.assertEqual(result['uuid'], str(public_published.uuid))
+        self.assertIn('creator', result)
+        self.assertIn('top_image_url', result)
+        self.assertIn('bottom_image_url', result)
+
+    def test_explore_supports_search_and_store_filter(self):
+        outfit_one = self.create_outfit(
+            self.other_user,
+            status_value=Outfit.Status.PUBLISHED,
+            title='Alpha Jacket Fit',
+        )
+        self.create_outfit_item(outfit_one, OutfitItem.Slot.TOP, self.top_product)
+        self.create_outfit_item(outfit_one, OutfitItem.Slot.BOTTOM, self.bottom_product)
+
+        outfit_two = self.create_outfit(
+            self.user,
+            status_value=Outfit.Status.PUBLISHED,
+            title='Beta Fit',
+        )
+        self.create_outfit_item(outfit_two, OutfitItem.Slot.TOP, self.top_product_two)
+        self.create_outfit_item(outfit_two, OutfitItem.Slot.BOTTOM, self.bottom_product)
+
+        self.client.force_authenticate(user=self.other_user)
+        response = self.client.get('/api/explore/outfits/?search=Alpha')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['uuid'], str(outfit_one.uuid))
+
+        response = self.client.get('/api/explore/outfits/?store=store-two')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['uuid'], str(outfit_two.uuid))
+
+    def test_hidden_outfit_not_available_to_guests_but_visible_to_owner_and_admin(self):
+        published = self.create_outfit(
+            self.user,
+            status_value=Outfit.Status.PUBLISHED,
+            title='Moderated Fit',
+        )
+        published.is_hidden = True
+        published.hidden_reason = 'Policy violation'
+        published.save(update_fields=['is_hidden', 'hidden_reason'])
+        self.create_outfit_item(published, OutfitItem.Slot.TOP, self.top_product)
+        self.create_outfit_item(published, OutfitItem.Slot.BOTTOM, self.bottom_product)
+
+        response = self.client.get(f'/api/outfits/{published.uuid}/')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(f'/api/outfits/{published.uuid}/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['is_hidden'])
+
+        self.client.force_authenticate(user=self.admin_user)
+        response = self.client.get(f'/api/outfits/{published.uuid}/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['is_hidden'])
+
+    def test_moderation_requires_admin(self):
+        published = self.create_outfit(self.user, status_value=Outfit.Status.PUBLISHED)
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.patch(
+            f'/api/outfits/{published.uuid}/moderation/',
+            {'is_hidden': True, 'hidden_reason': 'Review'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_admin_moderation_hide_and_unhide(self):
+        published = self.create_outfit(
+            self.user,
+            status_value=Outfit.Status.PUBLISHED,
+            title='Visibility Fit',
+        )
+        self.create_outfit_item(published, OutfitItem.Slot.TOP, self.top_product)
+        self.create_outfit_item(published, OutfitItem.Slot.BOTTOM, self.bottom_product)
+        self.client.force_authenticate(user=self.admin_user)
+
+        hide_response = self.client.patch(
+            f'/api/outfits/{published.uuid}/moderation/',
+            {'is_hidden': True, 'hidden_reason': 'Admin hide'},
+            format='json',
+        )
+        self.assertEqual(hide_response.status_code, status.HTTP_200_OK)
+        published.refresh_from_db()
+        self.assertTrue(published.is_hidden)
+        self.assertEqual(published.hidden_reason, 'Admin hide')
+
+        explore_response = self.client.get('/api/explore/outfits/')
+        self.assertEqual(explore_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(explore_response.data['count'], 0)
+
+        unhide_response = self.client.patch(
+            f'/api/outfits/{published.uuid}/moderation/',
+            {'is_hidden': False},
+            format='json',
+        )
+        self.assertEqual(unhide_response.status_code, status.HTTP_200_OK)
+        published.refresh_from_db()
+        self.assertFalse(published.is_hidden)
+        self.assertIsNone(published.hidden_reason)

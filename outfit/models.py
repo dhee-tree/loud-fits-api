@@ -25,6 +25,8 @@ class Outfit(models.Model):
     title = models.CharField(max_length=255, blank=True, default='')
     notes = models.TextField(blank=True, default='')
     published_at = models.DateTimeField(null=True, blank=True)
+    is_hidden = models.BooleanField(default=False)
+    hidden_reason = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

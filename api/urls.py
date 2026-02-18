@@ -1,4 +1,5 @@
 from django.urls import path, include
+from outfit.views import ExploreOutfitListView
 
 urlpatterns = [
     path('auth/', include('authentication.urls')),
@@ -7,4 +8,5 @@ urlpatterns = [
     path('store/', include('store.urls')),
     path('products/', include('product.urls')),
     path('outfits/', include('outfit.urls')),
+    path('explore/outfits/', ExploreOutfitListView.as_view(), name='explore_outfits'),
 ]

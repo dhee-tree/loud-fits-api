@@ -5,9 +5,9 @@ from .models import Outfit, OutfitItem
 
 @admin.register(Outfit)
 class OutfitAdmin(admin.ModelAdmin):
-    list_display = ('uuid', 'owner', 'status', 'updated_at')
+    list_display = ('uuid', 'owner', 'status', 'is_hidden', 'updated_at')
     search_fields = ('owner__email', 'title')
-    list_filter = ('status',)
+    list_filter = ('status', 'is_hidden')
 
 
 @admin.register(OutfitItem)
