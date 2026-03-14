@@ -1,8 +1,11 @@
 import json
+import zipfile
+from pathlib import Path
 from django.utils import timezone
+from django.core.files.base import ContentFile
 from botocore.exceptions import BotoCoreError, ClientError
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import status, generics
+from rest_framework import status, generics, serializers
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -23,8 +26,128 @@ from product.serializers import (
     ProductListSerializer,
     ProductDetailSerializer,
     ProductUpdateSerializer,
+    ALLOWED_PRODUCT_IMAGE_EXTENSIONS,
+    validate_product_image_file,
 )
 from user.models import User
+
+
+def get_validated_image_archive(request):
+    archive_file = request.FILES.get("images")
+    if archive_file is None:
+        return None, Response(
+            {"images": ["A ZIP file is required."]},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if not zipfile.is_zipfile(archive_file):
+        return None, Response(
+            {"images": ["Only ZIP archives are supported."]},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    archive_file.seek(0)
+    return archive_file, None
+
+
+def parse_product_image_archive(archive_file, store):
+    matched_files = []
+    upload_candidates = []
+    invalid_files = []
+    missing_products = []
+    seen_external_ids = set()
+
+    archive_file.seek(0)
+    with zipfile.ZipFile(archive_file) as archive:
+        file_infos = [info for info in archive.infolist() if not info.is_dir()]
+
+        for info in file_infos:
+            file_name = Path(info.filename).name
+            external_id = Path(file_name).stem.strip()
+            extension = Path(file_name).suffix.lower()
+
+            if extension not in ALLOWED_PRODUCT_IMAGE_EXTENSIONS:
+                invalid_files.append(
+                    {
+                        "filename": file_name,
+                        "error": "Only JPG and PNG files are supported.",
+                    }
+                )
+                continue
+
+            if not external_id:
+                invalid_files.append(
+                    {
+                        "filename": file_name,
+                        "error": "Filename must include a product external ID.",
+                    }
+                )
+                continue
+
+            if external_id in seen_external_ids:
+                invalid_files.append(
+                    {
+                        "filename": file_name,
+                        "error": "Duplicate external ID in ZIP archive.",
+                    }
+                )
+                continue
+
+            seen_external_ids.add(external_id)
+
+            product = Product.objects.filter(
+                store=store,
+                external_id=external_id,
+            ).first()
+            if product is None:
+                missing_products.append(external_id)
+                continue
+
+            try:
+                uploaded_file = ContentFile(
+                    archive.read(info),
+                    name=file_name,
+                )
+                validate_product_image_file(uploaded_file)
+            except serializers.ValidationError as exc:
+                error_message = (
+                    exc.detail[0]
+                    if hasattr(exc, "detail") and exc.detail
+                    else "Invalid image file."
+                )
+                invalid_files.append(
+                    {
+                        "filename": file_name,
+                        "error": str(error_message),
+                    }
+                )
+                continue
+
+            matched_files.append(
+                {
+                    "filename": file_name,
+                    "external_id": external_id,
+                    "product_uuid": str(product.uuid),
+                    "product_name": product.name,
+                }
+            )
+            upload_candidates.append(
+                {
+                    "file_name": file_name,
+                    "product": product,
+                    "uploaded_file": uploaded_file,
+                }
+            )
+
+    return {
+        "total_files": len(file_infos),
+        "matched_count": len(matched_files),
+        "matched_files": matched_files,
+        "missing_products": missing_products,
+        "invalid_files": invalid_files,
+        "can_upload": bool(upload_candidates),
+        "upload_candidates": upload_candidates,
+    }
 
 
 class StoreProductListView(generics.ListAPIView):
@@ -52,6 +175,7 @@ class StoreProductDetailView(APIView):
     PATCH /api/store/products/<uuid>/
     """
     permission_classes = [IsAuthenticated, IsStoreOwner]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_object(self, request, product_uuid):
         return Product.objects.get(
@@ -68,7 +192,10 @@ class StoreProductDetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        serializer = ProductDetailSerializer(product)
+        serializer = ProductDetailSerializer(
+            product,
+            context={"request": request},
+        )
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def patch(self, request, product_uuid):
@@ -90,8 +217,86 @@ class StoreProductDetailView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         product = serializer.save()
-        response_serializer = ProductDetailSerializer(product)
+        response_serializer = ProductDetailSerializer(
+            product,
+            context={"request": request},
+        )
         return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+class StoreProductImageBatchUploadView(APIView):
+    """
+    POST /api/store/products/images/upload/
+
+    Accepts a ZIP file containing JPG or PNG files named after product external IDs.
+    Example: EXT-001.jpg maps to product external_id=EXT-001.
+    """
+    permission_classes = [IsAuthenticated, IsStoreOwner]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        archive_file, error_response = get_validated_image_archive(request)
+        if error_response is not None:
+            return error_response
+
+        archive_result = parse_product_image_archive(
+            archive_file,
+            request.user.store,
+        )
+        updated = 0
+        for item in archive_result["upload_candidates"]:
+            product = item["product"]
+            uploaded_file = item["uploaded_file"]
+            file_name = item["file_name"]
+
+            previous_image_name = (
+                product.uploaded_image.name if product.uploaded_image else None
+            )
+            product.uploaded_image.save(file_name, uploaded_file, save=False)
+            product.save(update_fields=["uploaded_image", "updated_at"])
+            if previous_image_name and previous_image_name != product.uploaded_image.name:
+                product.uploaded_image.storage.delete(previous_image_name)
+
+            updated += 1
+
+        response_payload = {
+            key: value
+            for key, value in archive_result.items()
+            if key != "upload_candidates"
+        }
+        response_payload["updated"] = updated
+
+        return Response(
+            response_payload,
+            status=status.HTTP_200_OK,
+        )
+
+
+class StoreProductImageBatchPreviewView(APIView):
+    """
+    POST /api/store/products/images/preview/
+
+    Validates a ZIP file containing JPG or PNG files named after product external IDs.
+    """
+    permission_classes = [IsAuthenticated, IsStoreOwner]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        archive_file, error_response = get_validated_image_archive(request)
+        if error_response is not None:
+            return error_response
+
+        archive_result = parse_product_image_archive(
+            archive_file,
+            request.user.store,
+        )
+        response_payload = {
+            key: value
+            for key, value in archive_result.items()
+            if key != "upload_candidates"
+        }
+
+        return Response(response_payload, status=status.HTTP_200_OK)
 
 
 class FeedPreviewView(APIView):

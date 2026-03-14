@@ -82,7 +82,12 @@ class OutfitItem(models.Model):
         return f"{self.outfit.uuid} - {self.slot}"
 
     @staticmethod
-    def resolve_image_url(product):
+    def resolve_image_url(product, request=None):
+        if hasattr(product, 'get_image_url'):
+            resolved_image_url = product.get_image_url(request=request)
+            if resolved_image_url:
+                return resolved_image_url
+
         candidate_fields = [
             'thumb_url',
             'cached_image_url',
@@ -98,10 +103,10 @@ class OutfitItem(models.Model):
                 return value
         return ''
 
-    def apply_product_snapshot(self, product):
+    def apply_product_snapshot(self, product, request=None):
         self.product = product
         self.product_name = product.name
-        self.image_url_used = self.resolve_image_url(product)
+        self.image_url_used = self.resolve_image_url(product, request=request)
         self.product_url = getattr(product, 'product_url', '') or ''
 
         store = getattr(product, 'store', None)

@@ -1,4 +1,5 @@
 import uuid
+from pathlib import Path
 from django.db import models
 from django.conf import settings
 from store.models import Store
@@ -13,6 +14,12 @@ class StockStatus(models.TextChoices):
     IN_STOCK = 'in_stock', 'In Stock'
     OUT_OF_STOCK = 'out_of_stock', 'Out of Stock'
     LOW_STOCK = 'low_stock', 'Low Stock'
+
+
+def product_image_upload_to(instance, filename):
+    extension = Path(filename).suffix.lower() or '.jpg'
+    unique_suffix = uuid.uuid4().hex[:8]
+    return f"products/{instance.uuid}-{unique_suffix}{extension}"
 
 
 class Product(models.Model):
@@ -31,6 +38,12 @@ class Product(models.Model):
         choices=CategoryChoices.choices
     )
     image_url = models.URLField(max_length=2048)
+    uploaded_image = models.ImageField(
+        upload_to=product_image_upload_to,
+        max_length=255,
+        blank=True,
+        null=True,
+    )
     price = models.DecimalField(max_digits=10, decimal_places=2)
     currency = models.CharField(max_length=3, default='GBP')
     product_url = models.URLField(max_length=2048)
@@ -68,6 +81,13 @@ class Product(models.Model):
         """Update stock_status based on stock_quantity and save."""
         self.stock_status = self.calculate_stock_status()
         self.save(update_fields=['stock_status', 'updated_at'])
+
+    def get_image_url(self, request=None):
+        if self.uploaded_image:
+            if request is not None:
+                return request.build_absolute_uri(self.uploaded_image.url)
+            return self.uploaded_image.url
+        return self.image_url
 
 
 class ProductImportBatch(models.Model):

@@ -175,10 +175,10 @@ class OutfitSlotItemView(APIView):
             defaults={
                 'product': product,
                 'product_name': product.name,
-                'image_url_used': OutfitItem.resolve_image_url(product),
+                'image_url_used': OutfitItem.resolve_image_url(product, request=request),
             },
         )
-        item.apply_product_snapshot(product)
+        item.apply_product_snapshot(product, request=request)
         item.save()
         outfit.save(update_fields=['updated_at'])
 

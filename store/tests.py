@@ -1,6 +1,7 @@
 import json
 import shutil
 import uuid
+import zipfile
 from io import BytesIO
 from pathlib import Path
 from django.test import TestCase, override_settings
@@ -9,6 +10,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
 from rest_framework import status
 from PIL import Image
+from loud_fits_api.storage_backends import PrivateMediaStorage
 from user.models import User
 from store.models import Store
 from product.models import Product, ProductImportBatch, StockStatus
@@ -16,6 +18,31 @@ from product.models import Product, ProductImportBatch, StockStatus
 
 class StoreTestCase(TestCase):
     """Base test class with common setup for store tests."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        base_test_media_root = Path(settings.BASE_DIR) / "tests" / "stores"
+        base_test_media_root.mkdir(parents=True, exist_ok=True)
+        cls._test_media_root = base_test_media_root / f"store-{uuid.uuid4().hex}"
+        cls._test_media_root.mkdir(parents=True, exist_ok=True)
+        cls._settings_override = override_settings(
+            STORAGES={
+                "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+                "staticfiles": {
+                    "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+                },
+            },
+            MEDIA_ROOT=str(cls._test_media_root),
+            MEDIA_URL="/media/",
+        )
+        cls._settings_override.enable()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._settings_override.disable()
+        shutil.rmtree(cls._test_media_root, ignore_errors=True)
+        super().tearDownClass()
 
     def setUp(self):
         self.client = APIClient()
@@ -91,6 +118,48 @@ class StoreTestCase(TestCase):
             image_io.read(),
             content_type=content_type,
         )
+
+    def create_product_image_file(
+        self,
+        filename='product.jpg',
+        image_format='JPEG',
+        content_type='image/jpeg',
+        size=(24, 24),
+    ):
+        image_io = BytesIO()
+        image = Image.new('RGB', size=size, color=(255, 128, 0))
+        image.save(image_io, format=image_format)
+        image_io.seek(0)
+        return SimpleUploadedFile(
+            filename,
+            image_io.read(),
+            content_type=content_type,
+        )
+
+    def create_zip_file(self, files, filename='images.zip'):
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w') as archive:
+            for member_name, file_obj in files.items():
+                file_obj.seek(0)
+                archive.writestr(member_name, file_obj.read())
+        zip_buffer.seek(0)
+        return SimpleUploadedFile(
+            filename,
+            zip_buffer.read(),
+            content_type='application/zip',
+        )
+
+
+class PrivateMediaStorageTests(TestCase):
+    """Tests for private media storage URL behaviour."""
+
+    def test_private_media_storage_uses_signed_urls(self):
+        storage = PrivateMediaStorage()
+
+        self.assertEqual(storage.location, "media/private")
+        self.assertFalse(storage.custom_domain)
+        self.assertTrue(storage.querystring_auth)
+        self.assertGreater(storage.querystring_expire, 0)
 
 
 class FeedPreviewTests(StoreTestCase):
@@ -616,6 +685,7 @@ class StoreProductListTests(StoreTestCase):
         self.assertSetEqual(external_ids, {"EXT-001", "EXT-002"})
         first_item = response.data["results"][0]
         self.assertIn("uuid", first_item)
+        self.assertIn("has_uploaded_image", first_item)
         self.assertIn("stock_status", first_item)
         self.assertIn("updated_at", first_item)
         self.assertNotIn("price", first_item)
@@ -715,6 +785,8 @@ class StoreProductDetailTests(StoreTestCase):
         self.assertIn("stock_quantity", response.data)
         self.assertIn("created_at", response.data)
         self.assertIn("store", response.data)
+        self.assertIn("has_uploaded_image", response.data)
+        self.assertIn("uploaded_image_url", response.data)
 
     def test_product_detail_updates_product(self):
         self.client.force_authenticate(user=self.user)
@@ -759,34 +831,366 @@ class StoreProductDetailTests(StoreTestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("external_id", response.data)
 
+    def test_product_detail_uploads_single_image(self):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.patch(
+            self.url,
+            {
+                "uploaded_image": self.create_product_image_file(),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.product.refresh_from_db()
+        self.assertTrue(bool(self.product.uploaded_image))
+        self.assertTrue(response.data["has_uploaded_image"])
+        self.assertIsNotNone(response.data["uploaded_image_url"])
+        self.assertEqual(response.data["image_url"], response.data["uploaded_image_url"])
+
+    def test_product_detail_rejects_invalid_single_image_type(self):
+        self.client.force_authenticate(user=self.user)
+
+        invalid_file = SimpleUploadedFile(
+            "product.gif",
+            b"gif-content",
+            content_type="image/gif",
+        )
+
+        response = self.client.patch(
+            self.url,
+            {"uploaded_image": invalid_file},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("uploaded_image", response.data)
+
+    def test_product_detail_remove_uploaded_image(self):
+        self.product.uploaded_image = self.create_product_image_file()
+        self.product.save(update_fields=["uploaded_image"])
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.patch(
+            self.url,
+            {"remove_uploaded_image": "true"},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.product.refresh_from_db()
+        self.assertFalse(bool(self.product.uploaded_image))
+        self.assertFalse(response.data["has_uploaded_image"])
+        self.assertIsNone(response.data["uploaded_image_url"])
+        self.assertEqual(response.data["image_url"], self.product.image_url)
+
+
+class StoreProductImageBatchPreviewTests(StoreTestCase):
+    """Tests for the batch product image preview endpoint."""
+
+    def setUp(self):
+        super().setUp()
+        self.url = "/api/store/products/images/preview/"
+        self.user, self.store = self.create_store_user()
+        self.product_one = Product.objects.create(
+            store=self.store,
+            external_id="EXT-001",
+            name="Blue Tee",
+            category="top",
+            image_url="https://example.com/blue.jpg",
+            price=19.99,
+            currency="GBP",
+            product_url="https://example.com/blue",
+            is_active=True,
+            stock_status=StockStatus.IN_STOCK,
+            stock_quantity=15,
+        )
+        self.product_two = Product.objects.create(
+            store=self.store,
+            external_id="EXT-002",
+            name="Black Jeans",
+            category="bottom",
+            image_url="https://example.com/black.jpg",
+            price=49.99,
+            currency="GBP",
+            product_url="https://example.com/black",
+            is_active=True,
+            stock_status=StockStatus.IN_STOCK,
+            stock_quantity=7,
+        )
+
+    def test_batch_image_preview_requires_authentication(self):
+        response = self.client.post(self.url, {}, format="multipart")
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_batch_image_preview_requires_store_account(self):
+        user = self.create_regular_user()
+        self.client.force_authenticate(user=user)
+
+        response = self.client.post(self.url, {}, format="multipart")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_batch_image_preview_returns_matches_without_uploading(self):
+        self.client.force_authenticate(user=self.user)
+        archive = self.create_zip_file(
+            {
+                "EXT-001.jpg": self.create_product_image_file(
+                    filename="EXT-001.jpg",
+                    image_format="JPEG",
+                    content_type="image/jpeg",
+                ),
+                "EXT-002.png": self.create_product_image_file(
+                    filename="EXT-002.png",
+                    image_format="PNG",
+                    content_type="image/png",
+                ),
+            }
+        )
+
+        response = self.client.post(
+            self.url,
+            {"images": archive},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["total_files"], 2)
+        self.assertEqual(response.data["matched_count"], 2)
+        self.assertEqual(len(response.data["matched_files"]), 2)
+        self.assertTrue(response.data["can_upload"])
+        self.assertEqual(response.data["missing_products"], [])
+        self.assertEqual(response.data["invalid_files"], [])
+
+        self.product_one.refresh_from_db()
+        self.product_two.refresh_from_db()
+        self.assertFalse(bool(self.product_one.uploaded_image))
+        self.assertFalse(bool(self.product_two.uploaded_image))
+
+    def test_batch_image_preview_rejects_non_zip_upload(self):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            self.url,
+            {
+                "images": SimpleUploadedFile(
+                    "images.txt",
+                    b"not-a-zip",
+                    content_type="text/plain",
+                )
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("images", response.data)
+
+    def test_batch_image_preview_reports_missing_products_and_invalid_files(self):
+        self.client.force_authenticate(user=self.user)
+        archive = self.create_zip_file(
+            {
+                "EXT-001.jpg": self.create_product_image_file(
+                    filename="EXT-001.jpg",
+                    image_format="JPEG",
+                    content_type="image/jpeg",
+                ),
+                "MISSING-001.png": self.create_product_image_file(
+                    filename="MISSING-001.png",
+                    image_format="PNG",
+                    content_type="image/png",
+                ),
+                "EXT-002.gif": SimpleUploadedFile(
+                    "EXT-002.gif",
+                    b"gif-content",
+                    content_type="image/gif",
+                ),
+            }
+        )
+
+        response = self.client.post(
+            self.url,
+            {"images": archive},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["matched_count"], 1)
+        self.assertTrue(response.data["can_upload"])
+        self.assertEqual(response.data["missing_products"], ["MISSING-001"])
+        self.assertEqual(len(response.data["invalid_files"]), 1)
+        self.assertEqual(response.data["invalid_files"][0]["filename"], "EXT-002.gif")
+
+    def test_batch_image_preview_flags_duplicate_external_ids(self):
+        self.client.force_authenticate(user=self.user)
+        archive = self.create_zip_file(
+            {
+                "EXT-001.jpg": self.create_product_image_file(
+                    filename="EXT-001.jpg",
+                    image_format="JPEG",
+                    content_type="image/jpeg",
+                ),
+                "nested/EXT-001.png": self.create_product_image_file(
+                    filename="EXT-001.png",
+                    image_format="PNG",
+                    content_type="image/png",
+                ),
+            }
+        )
+
+        response = self.client.post(
+            self.url,
+            {"images": archive},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["matched_count"], 1)
+        self.assertEqual(len(response.data["invalid_files"]), 1)
+        self.assertEqual(
+            response.data["invalid_files"][0]["error"],
+            "Duplicate external ID in ZIP archive.",
+        )
+
+
+class StoreProductImageBatchUploadTests(StoreTestCase):
+    """Tests for the batch product image upload endpoint."""
+
+    def setUp(self):
+        super().setUp()
+        self.url = "/api/store/products/images/upload/"
+        self.user, self.store = self.create_store_user()
+        self.product_one = Product.objects.create(
+            store=self.store,
+            external_id="EXT-001",
+            name="Blue Tee",
+            category="top",
+            image_url="https://example.com/blue.jpg",
+            price=19.99,
+            currency="GBP",
+            product_url="https://example.com/blue",
+            is_active=True,
+            stock_status=StockStatus.IN_STOCK,
+            stock_quantity=15,
+        )
+        self.product_two = Product.objects.create(
+            store=self.store,
+            external_id="EXT-002",
+            name="Black Jeans",
+            category="bottom",
+            image_url="https://example.com/black.jpg",
+            price=49.99,
+            currency="GBP",
+            product_url="https://example.com/black",
+            is_active=True,
+            stock_status=StockStatus.IN_STOCK,
+            stock_quantity=7,
+        )
+
+    def test_batch_image_upload_requires_authentication(self):
+        response = self.client.post(self.url, {}, format="multipart")
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_batch_image_upload_requires_store_account(self):
+        user = self.create_regular_user()
+        self.client.force_authenticate(user=user)
+
+        response = self.client.post(self.url, {}, format="multipart")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_batch_image_upload_updates_products_by_external_id(self):
+        self.client.force_authenticate(user=self.user)
+        archive = self.create_zip_file(
+            {
+                "EXT-001.jpg": self.create_product_image_file(
+                    filename="EXT-001.jpg",
+                    image_format="JPEG",
+                    content_type="image/jpeg",
+                ),
+                "EXT-002.png": self.create_product_image_file(
+                    filename="EXT-002.png",
+                    image_format="PNG",
+                    content_type="image/png",
+                ),
+            }
+        )
+
+        response = self.client.post(
+            self.url,
+            {"images": archive},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["total_files"], 2)
+        self.assertEqual(response.data["matched_count"], 2)
+        self.assertEqual(response.data["updated"], 2)
+        self.assertTrue(response.data["can_upload"])
+        self.assertEqual(response.data["missing_products"], [])
+        self.assertEqual(response.data["invalid_files"], [])
+
+        self.product_one.refresh_from_db()
+        self.product_two.refresh_from_db()
+        self.assertTrue(bool(self.product_one.uploaded_image))
+        self.assertTrue(bool(self.product_two.uploaded_image))
+
+    def test_batch_image_upload_rejects_non_zip_upload(self):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            self.url,
+            {
+                "images": SimpleUploadedFile(
+                    "images.txt",
+                    b"not-a-zip",
+                    content_type="text/plain",
+                )
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("images", response.data)
+
+    def test_batch_image_upload_reports_missing_products_and_invalid_files(self):
+        self.client.force_authenticate(user=self.user)
+        archive = self.create_zip_file(
+            {
+                "EXT-001.jpg": self.create_product_image_file(
+                    filename="EXT-001.jpg",
+                    image_format="JPEG",
+                    content_type="image/jpeg",
+                ),
+                "MISSING-001.png": self.create_product_image_file(
+                    filename="MISSING-001.png",
+                    image_format="PNG",
+                    content_type="image/png",
+                ),
+                "EXT-002.gif": SimpleUploadedFile(
+                    "EXT-002.gif",
+                    b"gif-content",
+                    content_type="image/gif",
+                ),
+            }
+        )
+
+        response = self.client.post(
+            self.url,
+            {"images": archive},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["matched_count"], 1)
+        self.assertEqual(response.data["updated"], 1)
+        self.assertEqual(response.data["missing_products"], ["MISSING-001"])
+        self.assertEqual(len(response.data["invalid_files"]), 1)
+        self.assertEqual(response.data["invalid_files"][0]["filename"], "EXT-002.gif")
+
 
 class StoreManageTests(StoreTestCase):
     """Tests for the store manage endpoint."""
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        base_test_media_root = Path(settings.BASE_DIR) / "tests" / "stores"
-        base_test_media_root.mkdir(parents=True, exist_ok=True)
-        cls._test_media_root = base_test_media_root / f"store-{uuid.uuid4().hex}"
-        cls._test_media_root.mkdir(parents=True, exist_ok=True)
-        cls._settings_override = override_settings(
-            STORAGES={
-                "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-                "staticfiles": {
-                    "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
-                },
-            },
-            MEDIA_ROOT=str(cls._test_media_root),
-            MEDIA_URL="/media/",
-        )
-        cls._settings_override.enable()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._settings_override.disable()
-        shutil.rmtree(cls._test_media_root, ignore_errors=True)
-        super().tearDownClass()
 
     def setUp(self):
         super().setUp()

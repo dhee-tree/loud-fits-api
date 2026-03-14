@@ -4,6 +4,8 @@ from .views import (
     FeedImportView,
     StoreProductListView,
     StoreProductDetailView,
+    StoreProductImageBatchPreviewView,
+    StoreProductImageBatchUploadView,
     StoreManageView,
     StoreLastImportView,
 )
@@ -11,6 +13,8 @@ from .views import (
 urlpatterns = [
     path('products/', StoreProductListView.as_view(), name='store_products'),
     path('products/<uuid:product_uuid>/', StoreProductDetailView.as_view(), name='store_product_detail'),
+    path('products/images/preview/', StoreProductImageBatchPreviewView.as_view(), name='store_product_image_batch_preview'),
+    path('products/images/upload/', StoreProductImageBatchUploadView.as_view(), name='store_product_image_batch_upload'),
     path('feed/preview/', FeedPreviewView.as_view(), name='feed_preview'),
     path('feed/import/', FeedImportView.as_view(), name='feed_import'),
     path('manage/', StoreManageView.as_view(), name='store_manage'),
