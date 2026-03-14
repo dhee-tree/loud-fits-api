@@ -1,9 +1,36 @@
 from django.test import TestCase
+from django.test.client import RequestFactory
 from rest_framework.test import APIClient
 from rest_framework import status
+from api_common.media import build_private_media_url
 from user.models import User
 from store.models import Store
 from .models import Product, StockStatus
+
+
+class PrivateMediaUrlHelperTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def test_returns_none_for_empty_file_field(self):
+        self.assertIsNone(build_private_media_url(None))
+
+    def test_returns_absolute_url_without_request_when_already_absolute(self):
+        file_field = type("FileFieldStub", (), {"url": "https://example.com/file.jpg"})()
+
+        self.assertEqual(
+            build_private_media_url(file_field),
+            "https://example.com/file.jpg",
+        )
+
+    def test_builds_absolute_url_for_relative_paths_when_request_present(self):
+        file_field = type("FileFieldStub", (), {"url": "/media/private/file.jpg"})()
+        request = self.factory.get("/api/test/")
+
+        self.assertEqual(
+            build_private_media_url(file_field, request=request),
+            "http://testserver/media/private/file.jpg",
+        )
 
 
 class ProductBrowseTests(TestCase):

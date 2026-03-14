@@ -1,5 +1,6 @@
 from PIL import Image, UnidentifiedImageError
 from rest_framework import serializers
+from api_common.media import build_private_media_url
 from .models import Product
 
 ALLOWED_PRODUCT_IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png"}
@@ -131,12 +132,8 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         return obj.get_image_url(request=request)
 
     def get_uploaded_image_url(self, obj):
-        if not obj.uploaded_image:
-            return None
         request = self.context.get("request")
-        if request is not None:
-            return request.build_absolute_uri(obj.uploaded_image.url)
-        return obj.uploaded_image.url
+        return build_private_media_url(obj.uploaded_image, request=request)
 
     def get_has_uploaded_image(self, obj):
         return bool(obj.uploaded_image)

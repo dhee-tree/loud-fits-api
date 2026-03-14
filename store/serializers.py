@@ -3,6 +3,7 @@ from rest_framework import serializers
 from django.core.validators import URLValidator
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils.text import slugify
+from api_common.media import build_private_media_url
 from product.models import CategoryChoices, ProductImportBatch
 from .models import Store
 
@@ -240,12 +241,8 @@ class StoreManageSerializer(serializers.ModelSerializer):
         ]
 
     def get_logo_url(self, obj):
-        if not obj.logo:
-            return None
         request = self.context.get('request')
-        if request is not None:
-            return request.build_absolute_uri(obj.logo.url)
-        return obj.logo.url
+        return build_private_media_url(obj.logo, request=request)
 
     def validate_logo(self, value):
         if value is None:

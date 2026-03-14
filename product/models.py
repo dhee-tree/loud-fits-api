@@ -2,6 +2,7 @@ import uuid
 from pathlib import Path
 from django.db import models
 from django.conf import settings
+from api_common.media import build_private_media_url
 from store.models import Store
 
 
@@ -84,9 +85,7 @@ class Product(models.Model):
 
     def get_image_url(self, request=None):
         if self.uploaded_image:
-            if request is not None:
-                return request.build_absolute_uri(self.uploaded_image.url)
-            return self.uploaded_image.url
+            return build_private_media_url(self.uploaded_image, request=request)
         return self.image_url
 
 
