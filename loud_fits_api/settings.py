@@ -183,7 +183,12 @@ if AWS_S3_ENABLED:
         AWS_S3_ENDPOINT_URL = aws_s3_endpoint_url or None
 
         AWS_DEFAULT_ACL = None
-        AWS_QUERYSTRING_AUTH = False
+        AWS_QUERYSTRING_AUTH = True
+        AWS_QUERYSTRING_EXPIRE = config(
+            'AWS_QUERYSTRING_EXPIRE',
+            default=3600,
+            cast=int,
+        )
         AWS_S3_OBJECT_PARAMETERS = {'ServerSideEncryption': 'AES256'}
 
         STORAGES['default'] = {
