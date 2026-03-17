@@ -8,7 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api_common.pagination import Paginator
-from .models import Outfit, OutfitItem
+from .models import Outfit, OutfitItem, OutfitLike, OutfitSave
 from .serializers import (
     ExploreOutfitSerializer,
     OutfitCreateSerializer,
@@ -36,15 +36,30 @@ class OutfitListCreateView(generics.ListCreateAPIView):
     pagination_class = Paginator
 
     def get_queryset(self):
-        queryset = Outfit.objects.filter(owner=self.request.user).prefetch_related(
-            'items__product__store'
-        )
-        status_filter = self.request.query_params.get('status')
-        if status_filter:
-            valid_statuses = {choice[0] for choice in Outfit.Status.choices}
-            if status_filter not in valid_statuses:
-                raise ValidationError({'status': ['Invalid status value.']})
-            queryset = queryset.filter(status=status_filter)
+        liked = self.request.query_params.get('liked')
+        saved = self.request.query_params.get('saved')
+
+        if self.request.user.is_authenticated and (liked == 'true' or saved == 'true'):
+            queryset = Outfit.objects.filter(
+                status=Outfit.Status.PUBLISHED,
+                is_hidden=False,
+            ).prefetch_related('items__product__store')
+
+            if liked == 'true':
+                queryset = queryset.filter(likes__user=self.request.user)
+            if saved == 'true':
+                queryset = queryset.filter(saves__user=self.request.user)
+        else:
+            queryset = Outfit.objects.filter(owner=self.request.user).prefetch_related(
+                'items__product__store'
+            )
+            status_filter = self.request.query_params.get('status')
+            if status_filter:
+                valid_statuses = {choice[0] for choice in Outfit.Status.choices}
+                if status_filter not in valid_statuses:
+                    raise ValidationError({'status': ['Invalid status value.']})
+                queryset = queryset.filter(status=status_filter)
+
         return queryset
 
     def get_serializer_class(self):
@@ -142,7 +157,7 @@ class CurrentDraftView(APIView):
         outfit = queryset.order_by('-updated_at').first()
 
         if not outfit:
-            outfit = Outfit.objects.create(owner=request.user, status=Outfit.Status.DRAFT)
+            return Response(status=status.HTTP_404_NOT_FOUND)
 
         serializer = OutfitDetailSerializer(outfit, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -248,7 +263,7 @@ class OutfitPublishView(APIView):
 
 
 class ExploreOutfitListView(generics.ListAPIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
     serializer_class = ExploreOutfitSerializer
     pagination_class = Paginator
 
@@ -298,3 +313,43 @@ class OutfitModerationView(APIView):
             context={'request': request},
         )
         return Response(detail_serializer.data, status=status.HTTP_200_OK)
+
+
+class OutfitLikeView(APIView):
+    """Toggle like on an outfit. POST to like, DELETE to unlike."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, outfit_uuid):
+        outfit = get_object_or_404(
+            Outfit, uuid=outfit_uuid, status=Outfit.Status.PUBLISHED, is_hidden=False
+        )
+        _, created = OutfitLike.objects.get_or_create(user=request.user, outfit=outfit)
+        return Response(
+            {'liked': True, 'created': created},
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+    def delete(self, request, outfit_uuid):
+        outfit = get_object_or_404(Outfit, uuid=outfit_uuid)
+        OutfitLike.objects.filter(user=request.user, outfit=outfit).delete()
+        return Response({'liked': False}, status=status.HTTP_200_OK)
+
+
+class OutfitSaveView(APIView):
+    """Toggle save on an outfit. POST to save, DELETE to unsave."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, outfit_uuid):
+        outfit = get_object_or_404(
+            Outfit, uuid=outfit_uuid, status=Outfit.Status.PUBLISHED, is_hidden=False
+        )
+        _, created = OutfitSave.objects.get_or_create(user=request.user, outfit=outfit)
+        return Response(
+            {'saved': True, 'created': created},
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+    def delete(self, request, outfit_uuid):
+        outfit = get_object_or_404(Outfit, uuid=outfit_uuid)
+        OutfitSave.objects.filter(user=request.user, outfit=outfit).delete()
+        return Response({'saved': False}, status=status.HTTP_200_OK)

@@ -3,9 +3,11 @@ from django.urls import path
 from .views import (
     CurrentDraftView,
     OutfitDetailView,
+    OutfitLikeView,
     OutfitListCreateView,
     OutfitModerationView,
     OutfitPublishView,
+    OutfitSaveView,
     OutfitSlotItemView,
 )
 
@@ -25,4 +27,6 @@ urlpatterns = [
         OutfitSlotItemView.as_view(),
         name='outfit_slot_item',
     ),
+    path('<uuid:outfit_uuid>/like/', OutfitLikeView.as_view(), name='outfit_like'),
+    path('<uuid:outfit_uuid>/save/', OutfitSaveView.as_view(), name='outfit_save'),
 ]

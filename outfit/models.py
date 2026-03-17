@@ -121,3 +121,38 @@ class OutfitItem(models.Model):
 
         self.price = getattr(product, 'price', None)
         self.currency = getattr(product, 'currency', '') or ''
+
+
+User = settings.AUTH_USER_MODEL
+
+
+class OutfitLike(models.Model):
+    uuid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='outfit_likes')
+    outfit = models.ForeignKey(Outfit, on_delete=models.CASCADE, related_name='likes')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'outfit'], name='unique_outfit_like')
+        ]
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.email} likes {self.outfit.uuid}"
+
+
+class OutfitSave(models.Model):
+    uuid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='outfit_saves')
+    outfit = models.ForeignKey(Outfit, on_delete=models.CASCADE, related_name='saves')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'outfit'], name='unique_outfit_save')
+        ]
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.email} saved {self.outfit.uuid}"

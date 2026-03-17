@@ -57,6 +57,9 @@ class OutfitItemSerializer(serializers.ModelSerializer):
 class OutfitDetailSerializer(serializers.ModelSerializer):
     items = OutfitItemSerializer(many=True, read_only=True)
     creator = serializers.SerializerMethodField()
+    is_liked = serializers.SerializerMethodField()
+    is_saved = serializers.SerializerMethodField()
+    like_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Outfit
@@ -72,6 +75,9 @@ class OutfitDetailSerializer(serializers.ModelSerializer):
             'is_hidden',
             'hidden_reason',
             'items',
+            'is_liked',
+            'is_saved',
+            'like_count',
         ]
 
     def get_creator(self, obj):
@@ -81,12 +87,30 @@ class OutfitDetailSerializer(serializers.ModelSerializer):
             'display_name': get_creator_display_name(obj.owner),
         }
 
+    def get_is_liked(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return obj.likes.filter(user=request.user).exists()
+
+    def get_is_saved(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return obj.saves.filter(user=request.user).exists()
+
+    def get_like_count(self, obj):
+        return obj.likes.count()
+
 
 class ExploreOutfitSerializer(serializers.ModelSerializer):
     creator = serializers.SerializerMethodField()
     top_image_url = serializers.SerializerMethodField()
     bottom_image_url = serializers.SerializerMethodField()
     shoes_image_url = serializers.SerializerMethodField()
+    is_liked = serializers.SerializerMethodField()
+    is_saved = serializers.SerializerMethodField()
+    like_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Outfit
@@ -98,6 +122,9 @@ class ExploreOutfitSerializer(serializers.ModelSerializer):
             'top_image_url',
             'bottom_image_url',
             'shoes_image_url',
+            'is_liked',
+            'is_saved',
+            'like_count',
         ]
 
     def get_creator(self, obj):
@@ -129,6 +156,21 @@ class ExploreOutfitSerializer(serializers.ModelSerializer):
     def get_shoes_image_url(self, obj):
         request = self.context.get('request')
         return self.get_slot_image(obj, OutfitItem.Slot.SHOES, request=request)
+
+    def get_is_liked(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return obj.likes.filter(user=request.user).exists()
+
+    def get_is_saved(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return obj.saves.filter(user=request.user).exists()
+
+    def get_like_count(self, obj):
+        return obj.likes.count()
 
 
 class OutfitCreateSerializer(serializers.ModelSerializer):

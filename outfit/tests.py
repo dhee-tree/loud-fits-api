@@ -7,7 +7,7 @@ from rest_framework.test import APIClient
 from product.models import Product, StockStatus
 from store.models import Store
 from user.models import User
-from .models import Outfit, OutfitItem
+from .models import Outfit, OutfitItem, OutfitLike, OutfitSave
 
 
 class OutfitApiTests(TestCase):
@@ -149,14 +149,13 @@ class OutfitApiTests(TestCase):
         response = self.client.get('/api/outfits/current-draft/')
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    def test_current_draft_creates_new_when_none_exists(self):
+    def test_current_draft_returns_404_when_none_exists(self):
         self.client.force_authenticate(user=self.user)
         response = self.client.get('/api/outfits/current-draft/')
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['status'], Outfit.Status.DRAFT)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
         self.assertEqual(Outfit.objects.filter(
-            owner=self.user, status='draft').count(), 1)
+            owner=self.user, status='draft').count(), 0)
 
     def test_current_draft_returns_latest_existing_draft(self):
         first = self.create_outfit(self.user, title='Old Draft')
@@ -469,9 +468,9 @@ class OutfitApiTests(TestCase):
         published.refresh_from_db()
         self.assertEqual(published.status, Outfit.Status.PUBLISHED)
 
-    def test_explore_requires_authentication(self):
+    def test_explore_is_publicly_accessible(self):
         response = self.client.get('/api/explore/outfits/')
-        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     def test_explore_returns_only_visible_published(self):
         hidden_published = self.create_outfit(
@@ -595,6 +594,21 @@ class OutfitApiTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['is_hidden'])
 
+    def test_explore_public_access(self):
+        """Explore endpoint should be accessible without authentication."""
+        published = self.create_outfit(
+            self.user,
+            status_value=Outfit.Status.PUBLISHED,
+            title='Public Explore Fit',
+        )
+        self.create_outfit_item(published, OutfitItem.Slot.TOP, self.top_product)
+        self.create_outfit_item(published, OutfitItem.Slot.BOTTOM, self.bottom_product)
+
+        response = self.client.get('/api/explore/outfits/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['uuid'], str(published.uuid))
+
     def test_moderation_requires_admin(self):
         published = self.create_outfit(self.user, status_value=Outfit.Status.PUBLISHED)
         self.client.force_authenticate(user=self.user)
@@ -640,3 +654,301 @@ class OutfitApiTests(TestCase):
         published.refresh_from_db()
         self.assertFalse(published.is_hidden)
         self.assertIsNone(published.hidden_reason)
+
+
+class OutfitLikeTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email='liker@example.com',
+            password='testpass123',
+            account_type=User.AccountType.USER,
+        )
+        self.other_user = User.objects.create_user(
+            email='other_liker@example.com',
+            password='testpass123',
+            account_type=User.AccountType.USER,
+        )
+        self.store_owner = User.objects.create_user(
+            email='store_like@example.com',
+            password='testpass123',
+            account_type=User.AccountType.STORE,
+        )
+        self.store = Store.objects.create(
+            owner=self.store_owner,
+            name='Like Store',
+            slug='like-store',
+        )
+        self.top_product = Product.objects.create(
+            store=self.store,
+            external_id='LIKE-TOP-001',
+            name='Like Top',
+            category='top',
+            image_url='https://example.com/like-top.jpg',
+            price=30.00,
+            currency='GBP',
+            product_url='https://example.com/like-top',
+            is_active=True,
+            stock_status=StockStatus.IN_STOCK,
+            stock_quantity=10,
+        )
+        self.bottom_product = Product.objects.create(
+            store=self.store,
+            external_id='LIKE-BOT-001',
+            name='Like Bottom',
+            category='bottom',
+            image_url='https://example.com/like-bottom.jpg',
+            price=40.00,
+            currency='GBP',
+            product_url='https://example.com/like-bottom',
+            is_active=True,
+            stock_status=StockStatus.IN_STOCK,
+            stock_quantity=10,
+        )
+        self.published_outfit = self._create_published_outfit(self.other_user, 'Likeable Fit')
+
+    def _create_published_outfit(self, owner, title=''):
+        outfit = Outfit.objects.create(
+            owner=owner,
+            status=Outfit.Status.PUBLISHED,
+            title=title,
+            published_at=timezone.now(),
+        )
+        OutfitItem.objects.create(
+            outfit=outfit,
+            slot=OutfitItem.Slot.TOP,
+            product=self.top_product,
+            product_name=self.top_product.name,
+            image_url_used=self.top_product.image_url,
+            product_url=self.top_product.product_url,
+            store_name=self.store.name,
+            store_slug=self.store.slug,
+            price=self.top_product.price,
+            currency=self.top_product.currency,
+        )
+        OutfitItem.objects.create(
+            outfit=outfit,
+            slot=OutfitItem.Slot.BOTTOM,
+            product=self.bottom_product,
+            product_name=self.bottom_product.name,
+            image_url_used=self.bottom_product.image_url,
+            product_url=self.bottom_product.product_url,
+            store_name=self.store.name,
+            store_slug=self.store.slug,
+            price=self.bottom_product.price,
+            currency=self.bottom_product.currency,
+        )
+        return outfit
+
+    def test_like_outfit_success(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            f'/api/outfits/{self.published_outfit.uuid}/like/')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(response.data['liked'])
+        self.assertTrue(response.data['created'])
+        self.assertTrue(
+            OutfitLike.objects.filter(
+                user=self.user, outfit=self.published_outfit).exists()
+        )
+
+    def test_like_outfit_already_liked(self):
+        self.client.force_authenticate(user=self.user)
+        self.client.post(f'/api/outfits/{self.published_outfit.uuid}/like/')
+        response = self.client.post(
+            f'/api/outfits/{self.published_outfit.uuid}/like/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['liked'])
+        self.assertFalse(response.data['created'])
+        self.assertEqual(
+            OutfitLike.objects.filter(
+                user=self.user, outfit=self.published_outfit).count(), 1
+        )
+
+    def test_unlike_outfit(self):
+        self.client.force_authenticate(user=self.user)
+        OutfitLike.objects.create(user=self.user, outfit=self.published_outfit)
+        response = self.client.delete(
+            f'/api/outfits/{self.published_outfit.uuid}/like/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['liked'])
+        self.assertFalse(
+            OutfitLike.objects.filter(
+                user=self.user, outfit=self.published_outfit).exists()
+        )
+
+    def test_like_unpublished_outfit(self):
+        draft = Outfit.objects.create(
+            owner=self.other_user,
+            status=Outfit.Status.DRAFT,
+            title='Draft Fit',
+        )
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(f'/api/outfits/{draft.uuid}/like/')
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_like_unauthenticated(self):
+        response = self.client.post(
+            f'/api/outfits/{self.published_outfit.uuid}/like/')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_list_liked_outfits(self):
+        self.client.force_authenticate(user=self.user)
+        self.client.post(f'/api/outfits/{self.published_outfit.uuid}/like/')
+
+        unliked_outfit = self._create_published_outfit(self.other_user, 'Unliked Fit')
+
+        response = self.client.get('/api/outfits/?liked=true')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        uuids = [r['uuid'] for r in response.data['results']]
+        self.assertIn(str(self.published_outfit.uuid), uuids)
+        self.assertNotIn(str(unliked_outfit.uuid), uuids)
+
+
+class OutfitSaveTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email='saver@example.com',
+            password='testpass123',
+            account_type=User.AccountType.USER,
+        )
+        self.other_user = User.objects.create_user(
+            email='other_saver@example.com',
+            password='testpass123',
+            account_type=User.AccountType.USER,
+        )
+        self.store_owner = User.objects.create_user(
+            email='store_save@example.com',
+            password='testpass123',
+            account_type=User.AccountType.STORE,
+        )
+        self.store = Store.objects.create(
+            owner=self.store_owner,
+            name='Save Store',
+            slug='save-store',
+        )
+        self.top_product = Product.objects.create(
+            store=self.store,
+            external_id='SAVE-TOP-001',
+            name='Save Top',
+            category='top',
+            image_url='https://example.com/save-top.jpg',
+            price=30.00,
+            currency='GBP',
+            product_url='https://example.com/save-top',
+            is_active=True,
+            stock_status=StockStatus.IN_STOCK,
+            stock_quantity=10,
+        )
+        self.bottom_product = Product.objects.create(
+            store=self.store,
+            external_id='SAVE-BOT-001',
+            name='Save Bottom',
+            category='bottom',
+            image_url='https://example.com/save-bottom.jpg',
+            price=40.00,
+            currency='GBP',
+            product_url='https://example.com/save-bottom',
+            is_active=True,
+            stock_status=StockStatus.IN_STOCK,
+            stock_quantity=10,
+        )
+        self.published_outfit = self._create_published_outfit(self.other_user, 'Saveable Fit')
+
+    def _create_published_outfit(self, owner, title=''):
+        outfit = Outfit.objects.create(
+            owner=owner,
+            status=Outfit.Status.PUBLISHED,
+            title=title,
+            published_at=timezone.now(),
+        )
+        OutfitItem.objects.create(
+            outfit=outfit,
+            slot=OutfitItem.Slot.TOP,
+            product=self.top_product,
+            product_name=self.top_product.name,
+            image_url_used=self.top_product.image_url,
+            product_url=self.top_product.product_url,
+            store_name=self.store.name,
+            store_slug=self.store.slug,
+            price=self.top_product.price,
+            currency=self.top_product.currency,
+        )
+        OutfitItem.objects.create(
+            outfit=outfit,
+            slot=OutfitItem.Slot.BOTTOM,
+            product=self.bottom_product,
+            product_name=self.bottom_product.name,
+            image_url_used=self.bottom_product.image_url,
+            product_url=self.bottom_product.product_url,
+            store_name=self.store.name,
+            store_slug=self.store.slug,
+            price=self.bottom_product.price,
+            currency=self.bottom_product.currency,
+        )
+        return outfit
+
+    def test_save_outfit_success(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            f'/api/outfits/{self.published_outfit.uuid}/save/')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(response.data['saved'])
+        self.assertTrue(response.data['created'])
+        self.assertTrue(
+            OutfitSave.objects.filter(
+                user=self.user, outfit=self.published_outfit).exists()
+        )
+
+    def test_save_outfit_already_saved(self):
+        self.client.force_authenticate(user=self.user)
+        self.client.post(f'/api/outfits/{self.published_outfit.uuid}/save/')
+        response = self.client.post(
+            f'/api/outfits/{self.published_outfit.uuid}/save/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['saved'])
+        self.assertFalse(response.data['created'])
+        self.assertEqual(
+            OutfitSave.objects.filter(
+                user=self.user, outfit=self.published_outfit).count(), 1
+        )
+
+    def test_unsave_outfit(self):
+        self.client.force_authenticate(user=self.user)
+        OutfitSave.objects.create(user=self.user, outfit=self.published_outfit)
+        response = self.client.delete(
+            f'/api/outfits/{self.published_outfit.uuid}/save/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['saved'])
+        self.assertFalse(
+            OutfitSave.objects.filter(
+                user=self.user, outfit=self.published_outfit).exists()
+        )
+
+    def test_save_unpublished_outfit(self):
+        draft = Outfit.objects.create(
+            owner=self.other_user,
+            status=Outfit.Status.DRAFT,
+            title='Draft Fit',
+        )
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(f'/api/outfits/{draft.uuid}/save/')
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_save_unauthenticated(self):
+        response = self.client.post(
+            f'/api/outfits/{self.published_outfit.uuid}/save/')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_list_saved_outfits(self):
+        self.client.force_authenticate(user=self.user)
+        self.client.post(f'/api/outfits/{self.published_outfit.uuid}/save/')
+
+        unsaved_outfit = self._create_published_outfit(self.other_user, 'Unsaved Fit')
+
+        response = self.client.get('/api/outfits/?saved=true')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        uuids = [r['uuid'] for r in response.data['results']]
+        self.assertIn(str(self.published_outfit.uuid), uuids)
+        self.assertNotIn(str(unsaved_outfit.uuid), uuids)
