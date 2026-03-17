@@ -48,6 +48,11 @@ class Product(models.Model):
     price = models.DecimalField(max_digits=10, decimal_places=2)
     currency = models.CharField(max_length=3, default='GBP')
     product_url = models.URLField(max_length=2048)
+    tryon_template_key = models.CharField(
+        max_length=120,
+        blank=True,
+        null=True,
+    )
     is_active = models.BooleanField(default=True)
     stock_status = models.CharField(
         max_length=20,

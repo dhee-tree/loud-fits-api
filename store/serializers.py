@@ -180,6 +180,13 @@ def validate_feed_products(products: list) -> dict:
                 'error': "Currency must be a 3-letter code (e.g., 'GBP', 'USD')."
             })
 
+        tryon_template_key = product.get('tryon_template_key')
+        if tryon_template_key is not None and not isinstance(tryon_template_key, str):
+            product_errors.append({
+                'field': 'tryon_template_key',
+                'error': 'Try-on template key must be a string.',
+            })
+
         if product_errors:
             errors.append({
                 'index': index,
@@ -196,6 +203,7 @@ def validate_feed_products(products: list) -> dict:
                 'currency': product['currency'],
                 'product_url': product['product_url'],
                 'stock_quantity': stock_quantity,
+                'tryon_template_key': (tryon_template_key or '').strip() or None,
             }
             valid_products.append(valid_product)
             # Count by category

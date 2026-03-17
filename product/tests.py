@@ -67,6 +67,7 @@ class ProductBrowseTests(TestCase):
             price=19.99,
             currency="GBP",
             product_url="https://example.com/blue",
+            tryon_template_key="top_basic_tee",
             is_active=True,
             stock_status=StockStatus.IN_STOCK,
             stock_quantity=12,
@@ -185,4 +186,8 @@ class ProductBrowseTests(TestCase):
         self.assertEqual(
             products_by_external_id["P-001"]["product_url"],
             "https://example.com/blue",
+        )
+        self.assertEqual(
+            products_by_external_id["P-001"]["tryon_template_key"],
+            "top_basic_tee",
         )

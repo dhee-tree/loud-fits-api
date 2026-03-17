@@ -82,6 +82,7 @@ class ProductBrowseSerializer(serializers.ModelSerializer):
             "price",
             "currency",
             "product_url",
+            "tryon_template_key",
             "is_active",
             "stock_status",
             "updated_at",
@@ -119,6 +120,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             "price",
             "currency",
             "product_url",
+            "tryon_template_key",
             "is_active",
             "stock_status",
             "stock_quantity",
@@ -165,6 +167,7 @@ class ProductUpdateSerializer(serializers.ModelSerializer):
             "price",
             "currency",
             "product_url",
+            "tryon_template_key",
             "is_active",
             "stock_quantity",
         ]
