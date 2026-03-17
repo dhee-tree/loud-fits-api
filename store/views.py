@@ -27,22 +27,24 @@ from product.serializers import (
     ProductDetailSerializer,
     ProductUpdateSerializer,
     ALLOWED_PRODUCT_IMAGE_EXTENSIONS,
+    ALLOWED_TRYON_ASSET_EXTENSIONS,
     validate_product_image_file,
+    validate_tryon_asset_file,
 )
 from user.models import User
 
 
-def get_validated_image_archive(request):
-    archive_file = request.FILES.get("images")
+def get_validated_zip_archive(request, file_field_name):
+    archive_file = request.FILES.get(file_field_name)
     if archive_file is None:
         return None, Response(
-            {"images": ["A ZIP file is required."]},
+            {file_field_name: ["A ZIP file is required."]},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
     if not zipfile.is_zipfile(archive_file):
         return None, Response(
-            {"images": ["Only ZIP archives are supported."]},
+            {file_field_name: ["Only ZIP archives are supported."]},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -50,7 +52,13 @@ def get_validated_image_archive(request):
     return archive_file, None
 
 
-def parse_product_image_archive(archive_file, store):
+def parse_product_asset_archive(
+    archive_file,
+    store,
+    allowed_extensions,
+    validate_file,
+    invalid_extension_message,
+):
     matched_files = []
     upload_candidates = []
     invalid_files = []
@@ -66,11 +74,11 @@ def parse_product_image_archive(archive_file, store):
             external_id = Path(file_name).stem.strip()
             extension = Path(file_name).suffix.lower()
 
-            if extension not in ALLOWED_PRODUCT_IMAGE_EXTENSIONS:
+            if extension not in allowed_extensions:
                 invalid_files.append(
                     {
                         "filename": file_name,
-                        "error": "Only JPG and PNG files are supported.",
+                        "error": invalid_extension_message,
                     }
                 )
                 continue
@@ -108,7 +116,7 @@ def parse_product_image_archive(archive_file, store):
                     archive.read(info),
                     name=file_name,
                 )
-                validate_product_image_file(uploaded_file)
+                validate_file(uploaded_file)
             except serializers.ValidationError as exc:
                 error_message = (
                     exc.detail[0]
@@ -148,6 +156,26 @@ def parse_product_image_archive(archive_file, store):
         "can_upload": bool(upload_candidates),
         "upload_candidates": upload_candidates,
     }
+
+
+def apply_product_asset_archive(upload_candidates, field_name):
+    updated = 0
+    for item in upload_candidates:
+        product = item["product"]
+        uploaded_file = item["uploaded_file"]
+        file_name = item["file_name"]
+
+        file_field = getattr(product, field_name)
+        previous_file_name = file_field.name if file_field else None
+        file_field.save(file_name, uploaded_file, save=False)
+        product.save(update_fields=[field_name, "updated_at"])
+        saved_file = getattr(product, field_name)
+        if previous_file_name and previous_file_name != saved_file.name:
+            saved_file.storage.delete(previous_file_name)
+
+        updated += 1
+
+    return updated
 
 
 class StoreProductListView(generics.ListAPIView):
@@ -235,29 +263,21 @@ class StoreProductImageBatchUploadView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request):
-        archive_file, error_response = get_validated_image_archive(request)
+        archive_file, error_response = get_validated_zip_archive(request, "images")
         if error_response is not None:
             return error_response
 
-        archive_result = parse_product_image_archive(
+        archive_result = parse_product_asset_archive(
             archive_file,
             request.user.store,
+            ALLOWED_PRODUCT_IMAGE_EXTENSIONS,
+            validate_product_image_file,
+            "Only JPG and PNG files are supported.",
         )
-        updated = 0
-        for item in archive_result["upload_candidates"]:
-            product = item["product"]
-            uploaded_file = item["uploaded_file"]
-            file_name = item["file_name"]
-
-            previous_image_name = (
-                product.uploaded_image.name if product.uploaded_image else None
-            )
-            product.uploaded_image.save(file_name, uploaded_file, save=False)
-            product.save(update_fields=["uploaded_image", "updated_at"])
-            if previous_image_name and previous_image_name != product.uploaded_image.name:
-                product.uploaded_image.storage.delete(previous_image_name)
-
-            updated += 1
+        updated = apply_product_asset_archive(
+            archive_result["upload_candidates"],
+            "uploaded_image",
+        )
 
         response_payload = {
             key: value
@@ -282,19 +302,94 @@ class StoreProductImageBatchPreviewView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request):
-        archive_file, error_response = get_validated_image_archive(request)
+        archive_file, error_response = get_validated_zip_archive(request, "images")
         if error_response is not None:
             return error_response
 
-        archive_result = parse_product_image_archive(
+        archive_result = parse_product_asset_archive(
             archive_file,
             request.user.store,
+            ALLOWED_PRODUCT_IMAGE_EXTENSIONS,
+            validate_product_image_file,
+            "Only JPG and PNG files are supported.",
         )
         response_payload = {
             key: value
             for key, value in archive_result.items()
             if key != "upload_candidates"
         }
+
+        return Response(response_payload, status=status.HTTP_200_OK)
+
+
+class StoreProductThreeDAssetBatchPreviewView(APIView):
+    """
+    POST /api/store/products/3d-assets/preview/
+
+    Validates a ZIP file containing GLB files named after product external IDs.
+    """
+    permission_classes = [IsAuthenticated, IsStoreOwner]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        archive_file, error_response = get_validated_zip_archive(
+            request,
+            "assets",
+        )
+        if error_response is not None:
+            return error_response
+
+        archive_result = parse_product_asset_archive(
+            archive_file,
+            request.user.store,
+            ALLOWED_TRYON_ASSET_EXTENSIONS,
+            validate_tryon_asset_file,
+            "Only GLB files are supported.",
+        )
+        response_payload = {
+            key: value
+            for key, value in archive_result.items()
+            if key != "upload_candidates"
+        }
+
+        return Response(response_payload, status=status.HTTP_200_OK)
+
+
+class StoreProductThreeDAssetBatchUploadView(APIView):
+    """
+    POST /api/store/products/3d-assets/upload/
+
+    Accepts a ZIP file containing GLB files named after product external IDs.
+    """
+    permission_classes = [IsAuthenticated, IsStoreOwner]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        archive_file, error_response = get_validated_zip_archive(
+            request,
+            "assets",
+        )
+        if error_response is not None:
+            return error_response
+
+        archive_result = parse_product_asset_archive(
+            archive_file,
+            request.user.store,
+            ALLOWED_TRYON_ASSET_EXTENSIONS,
+            validate_tryon_asset_file,
+            "Only GLB files are supported.",
+        )
+        updated = apply_product_asset_archive(
+            archive_result["upload_candidates"],
+            "tryon_asset",
+        )
+
+        response_payload = {
+            key: value
+            for key, value in archive_result.items()
+            if key != "upload_candidates"
+        }
+        response_payload["updated"] = updated
 
         return Response(response_payload, status=status.HTTP_200_OK)
 

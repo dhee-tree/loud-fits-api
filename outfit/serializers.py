@@ -23,6 +23,7 @@ class OutfitCreatorSerializer(serializers.Serializer):
 
 class OutfitItemSerializer(serializers.ModelSerializer):
     product_id = serializers.UUIDField(source='product.uuid', read_only=True)
+    tryon_asset_url = serializers.SerializerMethodField()
 
     class Meta:
         model = OutfitItem
@@ -36,7 +37,12 @@ class OutfitItemSerializer(serializers.ModelSerializer):
             'store_slug',
             'price',
             'currency',
+            'tryon_asset_url',
         ]
+
+    def get_tryon_asset_url(self, obj):
+        request = self.context.get('request')
+        return obj.product.get_tryon_asset_url(request=request)
 
 
 class OutfitDetailSerializer(serializers.ModelSerializer):

@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('product', '0002_rename_id_product_uuid_and_more'),
+        ('product', '0003_product_tryon_template_key'),
     ]
 
     operations = [

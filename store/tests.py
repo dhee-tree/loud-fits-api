@@ -149,6 +149,18 @@ class StoreTestCase(TestCase):
             content_type='application/zip',
         )
 
+    def create_glb_file(
+        self,
+        filename="product.glb",
+        content_type="model/gltf-binary",
+    ):
+        content = b"glTF" + b"\x02\x00\x00\x00" + b"\x00" * 16
+        return SimpleUploadedFile(
+            filename,
+            content,
+            content_type=content_type,
+        )
+
 
 class PrivateMediaStorageTests(TestCase):
     """Tests for private media storage URL behaviour."""
@@ -787,6 +799,8 @@ class StoreProductDetailTests(StoreTestCase):
         self.assertIn("store", response.data)
         self.assertIn("has_uploaded_image", response.data)
         self.assertIn("uploaded_image_url", response.data)
+        self.assertIn("has_tryon_asset", response.data)
+        self.assertIn("tryon_asset_url", response.data)
 
     def test_product_detail_updates_product(self):
         self.client.force_authenticate(user=self.user)
@@ -884,6 +898,58 @@ class StoreProductDetailTests(StoreTestCase):
         self.assertFalse(response.data["has_uploaded_image"])
         self.assertIsNone(response.data["uploaded_image_url"])
         self.assertEqual(response.data["image_url"], self.product.image_url)
+
+    def test_product_detail_uploads_single_tryon_asset(self):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.patch(
+            self.url,
+            {
+                "tryon_asset": self.create_glb_file(),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.product.refresh_from_db()
+        self.assertTrue(bool(self.product.tryon_asset))
+        self.assertTrue(response.data["has_tryon_asset"])
+        self.assertIsNotNone(response.data["tryon_asset_url"])
+
+    def test_product_detail_rejects_invalid_tryon_asset_type(self):
+        self.client.force_authenticate(user=self.user)
+
+        invalid_file = SimpleUploadedFile(
+            "product.obj",
+            b"not-a-glb",
+            content_type="model/obj",
+        )
+
+        response = self.client.patch(
+            self.url,
+            {"tryon_asset": invalid_file},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("tryon_asset", response.data)
+
+    def test_product_detail_remove_tryon_asset(self):
+        self.product.tryon_asset = self.create_glb_file()
+        self.product.save(update_fields=["tryon_asset"])
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.patch(
+            self.url,
+            {"remove_tryon_asset": "true"},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.product.refresh_from_db()
+        self.assertFalse(bool(self.product.tryon_asset))
+        self.assertFalse(response.data["has_tryon_asset"])
+        self.assertIsNone(response.data["tryon_asset_url"])
 
 
 class StoreProductImageBatchPreviewTests(StoreTestCase):
@@ -1187,6 +1253,195 @@ class StoreProductImageBatchUploadTests(StoreTestCase):
         self.assertEqual(response.data["missing_products"], ["MISSING-001"])
         self.assertEqual(len(response.data["invalid_files"]), 1)
         self.assertEqual(response.data["invalid_files"][0]["filename"], "EXT-002.gif")
+
+
+class StoreProductThreeDAssetBatchPreviewTests(StoreTestCase):
+    """Tests for the batch 3D asset preview endpoint."""
+
+    def setUp(self):
+        super().setUp()
+        self.url = "/api/store/products/3d-assets/preview/"
+        self.user, self.store = self.create_store_user()
+        self.product_one = Product.objects.create(
+            store=self.store,
+            external_id="TOP-001",
+            name="Blue Tee",
+            category="top",
+            image_url="https://example.com/blue.jpg",
+            price=19.99,
+            currency="GBP",
+            product_url="https://example.com/blue",
+            is_active=True,
+            stock_status=StockStatus.IN_STOCK,
+            stock_quantity=15,
+        )
+        self.product_two = Product.objects.create(
+            store=self.store,
+            external_id="BOTTOM-001",
+            name="Black Jeans",
+            category="bottom",
+            image_url="https://example.com/black.jpg",
+            price=49.99,
+            currency="GBP",
+            product_url="https://example.com/black",
+            is_active=True,
+            stock_status=StockStatus.IN_STOCK,
+            stock_quantity=7,
+        )
+
+    def test_batch_3d_preview_returns_matches_without_uploading(self):
+        self.client.force_authenticate(user=self.user)
+        archive = self.create_zip_file(
+            {
+                "TOP-001.glb": self.create_glb_file(filename="TOP-001.glb"),
+                "BOTTOM-001.glb": self.create_glb_file(filename="BOTTOM-001.glb"),
+            },
+            filename="assets.zip",
+        )
+
+        response = self.client.post(
+            self.url,
+            {"assets": archive},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["matched_count"], 2)
+        self.assertEqual(len(response.data["matched_files"]), 2)
+        self.assertTrue(response.data["can_upload"])
+        self.product_one.refresh_from_db()
+        self.assertFalse(bool(self.product_one.tryon_asset))
+
+    def test_batch_3d_preview_requires_authentication(self):
+        response = self.client.post(self.url, {}, format="multipart")
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_batch_3d_preview_requires_store_account(self):
+        user = self.create_regular_user()
+        self.client.force_authenticate(user=user)
+
+        response = self.client.post(self.url, {}, format="multipart")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_batch_3d_preview_reports_missing_products_and_invalid_files(self):
+        self.client.force_authenticate(user=self.user)
+        archive = self.create_zip_file(
+            {
+                "TOP-001.glb": self.create_glb_file(filename="TOP-001.glb"),
+                "MISSING-001.glb": self.create_glb_file(filename="MISSING-001.glb"),
+                "BOTTOM-001.txt": SimpleUploadedFile(
+                    "BOTTOM-001.txt",
+                    b"not-a-glb",
+                    content_type="text/plain",
+                ),
+            },
+            filename="assets.zip",
+        )
+
+        response = self.client.post(
+            self.url,
+            {"assets": archive},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["matched_count"], 1)
+        self.assertEqual(response.data["missing_products"], ["MISSING-001"])
+        self.assertEqual(len(response.data["invalid_files"]), 1)
+        self.assertEqual(
+            response.data["invalid_files"][0]["error"],
+            "Only GLB files are supported.",
+        )
+
+
+class StoreProductThreeDAssetBatchUploadTests(StoreTestCase):
+    """Tests for the batch 3D asset upload endpoint."""
+
+    def setUp(self):
+        super().setUp()
+        self.url = "/api/store/products/3d-assets/upload/"
+        self.user, self.store = self.create_store_user()
+        self.product_one = Product.objects.create(
+            store=self.store,
+            external_id="TOP-001",
+            name="Blue Tee",
+            category="top",
+            image_url="https://example.com/blue.jpg",
+            price=19.99,
+            currency="GBP",
+            product_url="https://example.com/blue",
+            is_active=True,
+            stock_status=StockStatus.IN_STOCK,
+            stock_quantity=15,
+        )
+        self.product_two = Product.objects.create(
+            store=self.store,
+            external_id="BOTTOM-001",
+            name="Black Jeans",
+            category="bottom",
+            image_url="https://example.com/black.jpg",
+            price=49.99,
+            currency="GBP",
+            product_url="https://example.com/black",
+            is_active=True,
+            stock_status=StockStatus.IN_STOCK,
+            stock_quantity=7,
+        )
+
+    def test_batch_3d_upload_updates_products_by_external_id(self):
+        self.client.force_authenticate(user=self.user)
+        archive = self.create_zip_file(
+            {
+                "TOP-001.glb": self.create_glb_file(filename="TOP-001.glb"),
+                "BOTTOM-001.glb": self.create_glb_file(filename="BOTTOM-001.glb"),
+            },
+            filename="assets.zip",
+        )
+
+        response = self.client.post(
+            self.url,
+            {"assets": archive},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["matched_count"], 2)
+        self.assertEqual(response.data["updated"], 2)
+        self.product_one.refresh_from_db()
+        self.product_two.refresh_from_db()
+        self.assertTrue(bool(self.product_one.tryon_asset))
+        self.assertTrue(bool(self.product_two.tryon_asset))
+
+    def test_batch_3d_upload_requires_authentication(self):
+        response = self.client.post(self.url, {}, format="multipart")
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_batch_3d_upload_requires_store_account(self):
+        user = self.create_regular_user()
+        self.client.force_authenticate(user=user)
+
+        response = self.client.post(self.url, {}, format="multipart")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_batch_3d_upload_rejects_non_zip_upload(self):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            self.url,
+            {
+                "assets": SimpleUploadedFile(
+                    "assets.txt",
+                    b"not-a-zip",
+                    content_type="text/plain",
+                )
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("assets", response.data)
 
 
 class StoreManageTests(StoreTestCase):

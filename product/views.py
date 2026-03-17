@@ -1,5 +1,9 @@
+from pathlib import Path
+
+from django.http import FileResponse, Http404
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import generics, permissions
+from rest_framework.views import APIView
 from rest_framework.filters import SearchFilter
 
 from api_common.pagination import Paginator
@@ -32,3 +36,32 @@ class ProductListView(generics.ListAPIView):
             queryset = queryset.exclude(stock_status=StockStatus.OUT_OF_STOCK)
 
         return queryset
+
+
+class ProductTryOnAssetView(APIView):
+    """
+    GET /api/products/<uuid>/tryon-asset/
+
+    Streams the uploaded product GLB through the API to avoid direct S3 CORS issues.
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, product_uuid):
+        product = Product.objects.filter(
+            uuid=product_uuid,
+            is_active=True,
+        ).first()
+        if product is None or not product.tryon_asset:
+            raise Http404("3D asset not found.")
+
+        asset_file = product.tryon_asset.open("rb")
+        response = FileResponse(
+            asset_file,
+            content_type="model/gltf-binary",
+            filename=Path(product.tryon_asset.name).name,
+        )
+        response["Content-Disposition"] = (
+            f'inline; filename="{Path(product.tryon_asset.name).name}"'
+        )
+        return response
