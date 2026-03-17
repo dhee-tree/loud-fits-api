@@ -41,6 +41,7 @@ class OutfitItem(models.Model):
     class Slot(models.TextChoices):
         TOP = 'top', 'Top'
         BOTTOM = 'bottom', 'Bottom'
+        SHOES = 'shoes', 'Shoes'
 
     uuid = models.UUIDField(
         primary_key=True, default=uuid.uuid4, editable=False)

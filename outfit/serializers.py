@@ -23,6 +23,7 @@ class OutfitCreatorSerializer(serializers.Serializer):
 
 class OutfitItemSerializer(serializers.ModelSerializer):
     product_id = serializers.UUIDField(source='product.uuid', read_only=True)
+    image_url_used = serializers.SerializerMethodField()
     tryon_asset_url = serializers.SerializerMethodField()
 
     class Meta:
@@ -43,6 +44,14 @@ class OutfitItemSerializer(serializers.ModelSerializer):
     def get_tryon_asset_url(self, obj):
         request = self.context.get('request')
         return obj.product.get_tryon_asset_url(request=request)
+
+    def get_image_url_used(self, obj):
+        request = self.context.get('request')
+        if hasattr(obj.product, 'get_image_url'):
+            current_image_url = obj.product.get_image_url(request=request)
+            if current_image_url:
+                return current_image_url
+        return obj.image_url_used
 
 
 class OutfitDetailSerializer(serializers.ModelSerializer):
@@ -77,6 +86,7 @@ class ExploreOutfitSerializer(serializers.ModelSerializer):
     creator = serializers.SerializerMethodField()
     top_image_url = serializers.SerializerMethodField()
     bottom_image_url = serializers.SerializerMethodField()
+    shoes_image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Outfit
@@ -87,6 +97,7 @@ class ExploreOutfitSerializer(serializers.ModelSerializer):
             'creator',
             'top_image_url',
             'bottom_image_url',
+            'shoes_image_url',
         ]
 
     def get_creator(self, obj):
@@ -97,17 +108,27 @@ class ExploreOutfitSerializer(serializers.ModelSerializer):
         }
 
     @staticmethod
-    def get_slot_image(obj, slot):
+    def get_slot_image(obj, slot, request=None):
         for item in obj.items.all():
             if item.slot == slot:
+                if hasattr(item.product, 'get_image_url'):
+                    current_image_url = item.product.get_image_url(request=request)
+                    if current_image_url:
+                        return current_image_url
                 return item.image_url_used
         return None
 
     def get_top_image_url(self, obj):
-        return self.get_slot_image(obj, OutfitItem.Slot.TOP)
+        request = self.context.get('request')
+        return self.get_slot_image(obj, OutfitItem.Slot.TOP, request=request)
 
     def get_bottom_image_url(self, obj):
-        return self.get_slot_image(obj, OutfitItem.Slot.BOTTOM)
+        request = self.context.get('request')
+        return self.get_slot_image(obj, OutfitItem.Slot.BOTTOM, request=request)
+
+    def get_shoes_image_url(self, obj):
+        request = self.context.get('request')
+        return self.get_slot_image(obj, OutfitItem.Slot.SHOES, request=request)
 
 
 class OutfitCreateSerializer(serializers.ModelSerializer):

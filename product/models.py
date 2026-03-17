@@ -2,6 +2,7 @@ import uuid
 from pathlib import Path
 from django.db import models
 from django.conf import settings
+from django.urls import reverse
 from api_common.media import build_private_media_url
 from store.models import Store
 
@@ -9,6 +10,7 @@ from store.models import Store
 class CategoryChoices(models.TextChoices):
     TOP = 'top', 'Top'
     BOTTOM = 'bottom', 'Bottom'
+    SHOES = 'shoes', 'Shoes'
 
 
 class StockStatus(models.TextChoices):
@@ -20,7 +22,13 @@ class StockStatus(models.TextChoices):
 def product_image_upload_to(instance, filename):
     extension = Path(filename).suffix.lower() or '.jpg'
     unique_suffix = uuid.uuid4().hex[:8]
-    return f"products/{instance.uuid}-{unique_suffix}{extension}"
+    return f"products/{instance.uuid}/images/{instance.uuid}-{unique_suffix}{extension}"
+
+
+def product_tryon_asset_upload_to(instance, filename):
+    extension = Path(filename).suffix.lower() or '.glb'
+    unique_suffix = uuid.uuid4().hex[:8]
+    return f"products/{instance.uuid}/3d/{instance.uuid}-{unique_suffix}{extension}"
 
 
 class Product(models.Model):
@@ -41,6 +49,12 @@ class Product(models.Model):
     image_url = models.URLField(max_length=2048)
     uploaded_image = models.ImageField(
         upload_to=product_image_upload_to,
+        max_length=255,
+        blank=True,
+        null=True,
+    )
+    tryon_asset = models.FileField(
+        upload_to=product_tryon_asset_upload_to,
         max_length=255,
         blank=True,
         null=True,
@@ -92,6 +106,15 @@ class Product(models.Model):
         if self.uploaded_image:
             return build_private_media_url(self.uploaded_image, request=request)
         return self.image_url
+
+    def get_tryon_asset_url(self, request=None):
+        if not self.tryon_asset:
+            return None
+        if request is not None:
+            return request.build_absolute_uri(
+                reverse("product_tryon_asset", kwargs={"product_uuid": self.uuid})
+            )
+        return build_private_media_url(self.tryon_asset, request=request)
 
 
 class ProductImportBatch(models.Model):

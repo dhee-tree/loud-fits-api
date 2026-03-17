@@ -56,7 +56,10 @@ class OutfitListCreateView(generics.ListCreateAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         outfit = serializer.save()
-        detail_serializer = OutfitDetailSerializer(outfit)
+        detail_serializer = OutfitDetailSerializer(
+            outfit,
+            context={'request': request},
+        )
         return Response(detail_serializer.data, status=status.HTTP_201_CREATED)
 
 
@@ -87,7 +90,7 @@ class OutfitDetailView(APIView):
             if not (is_owner or is_admin_user(request.user)):
                 raise Http404('Outfit not available.')
 
-        serializer = OutfitDetailSerializer(outfit)
+        serializer = OutfitDetailSerializer(outfit, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def patch(self, request, outfit_uuid):
@@ -108,7 +111,10 @@ class OutfitDetailView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
 
-        detail_serializer = OutfitDetailSerializer(outfit)
+        detail_serializer = OutfitDetailSerializer(
+            outfit,
+            context={'request': request},
+        )
         return Response(detail_serializer.data, status=status.HTTP_200_OK)
 
     def delete(self, request, outfit_uuid):
@@ -138,7 +144,7 @@ class CurrentDraftView(APIView):
         if not outfit:
             outfit = Outfit.objects.create(owner=request.user, status=Outfit.Status.DRAFT)
 
-        serializer = OutfitDetailSerializer(outfit)
+        serializer = OutfitDetailSerializer(outfit, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
@@ -185,7 +191,10 @@ class OutfitSlotItemView(APIView):
         refreshed_outfit = Outfit.objects.prefetch_related('items__product__store').get(
             uuid=outfit.uuid
         )
-        detail_serializer = OutfitDetailSerializer(refreshed_outfit)
+        detail_serializer = OutfitDetailSerializer(
+            refreshed_outfit,
+            context={'request': request},
+        )
         return Response(detail_serializer.data, status=status.HTTP_200_OK)
 
     def delete(self, request, outfit_uuid, slot):
@@ -211,7 +220,7 @@ class OutfitPublishView(APIView):
             if not outfit.published_at:
                 outfit.published_at = timezone.now()
                 outfit.save(update_fields=['published_at', 'updated_at'])
-            serializer = OutfitDetailSerializer(outfit)
+            serializer = OutfitDetailSerializer(outfit, context={'request': request})
             return Response(serializer.data, status=status.HTTP_200_OK)
 
         items = outfit.items.all()
@@ -234,7 +243,7 @@ class OutfitPublishView(APIView):
         outfit.published_at = timezone.now()
         outfit.save(update_fields=['status', 'published_at', 'updated_at'])
 
-        serializer = OutfitDetailSerializer(outfit)
+        serializer = OutfitDetailSerializer(outfit, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
@@ -284,5 +293,8 @@ class OutfitModerationView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
 
-        detail_serializer = OutfitDetailSerializer(outfit)
+        detail_serializer = OutfitDetailSerializer(
+            outfit,
+            context={'request': request},
+        )
         return Response(detail_serializer.data, status=status.HTTP_200_OK)

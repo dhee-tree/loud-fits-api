@@ -1,5 +1,6 @@
+from django.test import TestCase, override_settings
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
-from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APIClient
 
@@ -90,6 +91,19 @@ class OutfitApiTests(TestCase):
             is_active=True,
             stock_status=StockStatus.IN_STOCK,
             stock_quantity=6,
+        )
+        self.shoes_product = Product.objects.create(
+            store=self.store_two,
+            external_id='SHOES-001',
+            name='Shoe Product',
+            category='shoes',
+            image_url='https://example.com/shoes.jpg',
+            price=80.00,
+            currency='GBP',
+            product_url='https://example.com/shoes',
+            is_active=True,
+            stock_status=StockStatus.IN_STOCK,
+            stock_quantity=4,
         )
         self.inactive_product = Product.objects.create(
             store=self.store_one,
@@ -287,6 +301,12 @@ class OutfitApiTests(TestCase):
 
     def test_set_slot_item_creates_snapshot(self):
         draft = self.create_outfit(self.user, status_value=Outfit.Status.DRAFT)
+        self.top_product.tryon_asset = SimpleUploadedFile(
+            'top.glb',
+            b'glTF',
+            content_type='model/gltf-binary',
+        )
+        self.top_product.save(update_fields=['tryon_asset'])
         self.client.force_authenticate(user=self.user)
 
         response = self.client.put(
@@ -305,6 +325,10 @@ class OutfitApiTests(TestCase):
         self.assertEqual(item['store_name'], self.store_one.name)
         self.assertEqual(item['store_slug'], self.store_one.slug)
         self.assertEqual(item['currency'], self.top_product.currency)
+        self.assertIn(
+            f'/api/products/{self.top_product.uuid}/tryon-asset/',
+            item['tryon_asset_url'],
+        )
 
     def test_set_slot_item_replaces_existing(self):
         draft = self.create_outfit(self.user, status_value=Outfit.Status.DRAFT)
@@ -323,6 +347,24 @@ class OutfitApiTests(TestCase):
         item = OutfitItem.objects.get(outfit=draft, slot='top')
         self.assertEqual(item.product_id, self.top_product_two.uuid)
         self.assertEqual(item.store_slug, self.store_two.slug)
+
+    def test_set_slot_item_accepts_shoes(self):
+        draft = self.create_outfit(self.user, status_value=Outfit.Status.DRAFT)
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.put(
+            f'/api/outfits/{draft.uuid}/items/shoes/',
+            {'product_id': str(self.shoes_product.uuid)},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['items']), 1)
+        self.assertEqual(response.data['items'][0]['slot'], OutfitItem.Slot.SHOES)
+        self.assertEqual(
+            response.data['items'][0]['product_id'],
+            str(self.shoes_product.uuid),
+        )
 
     def test_set_slot_item_rejects_inactive_product(self):
         draft = self.create_outfit(self.user, status_value=Outfit.Status.DRAFT)
@@ -370,7 +412,7 @@ class OutfitApiTests(TestCase):
         self.client.force_authenticate(user=self.user)
 
         response = self.client.put(
-            f'/api/outfits/{draft.uuid}/items/shoes/',
+            f'/api/outfits/{draft.uuid}/items/accessory/',
             {'product_id': str(self.top_product.uuid)},
             format='json',
         )
@@ -403,6 +445,7 @@ class OutfitApiTests(TestCase):
         draft = self.create_outfit(self.user, status_value=Outfit.Status.DRAFT)
         self.create_outfit_item(draft, OutfitItem.Slot.TOP, self.top_product)
         self.create_outfit_item(draft, OutfitItem.Slot.BOTTOM, self.bottom_product)
+        self.create_outfit_item(draft, OutfitItem.Slot.SHOES, self.shoes_product)
         self.client.force_authenticate(user=self.user)
 
         response = self.client.post(f'/api/outfits/{draft.uuid}/publish/')
@@ -448,6 +491,7 @@ class OutfitApiTests(TestCase):
         )
         self.create_outfit_item(public_published, OutfitItem.Slot.TOP, self.top_product)
         self.create_outfit_item(public_published, OutfitItem.Slot.BOTTOM, self.bottom_product)
+        self.create_outfit_item(public_published, OutfitItem.Slot.SHOES, self.shoes_product)
 
         self.create_outfit(self.other_user, status_value=Outfit.Status.DRAFT, title='Draft Fit')
 
@@ -461,6 +505,42 @@ class OutfitApiTests(TestCase):
         self.assertIn('creator', result)
         self.assertIn('top_image_url', result)
         self.assertIn('bottom_image_url', result)
+        self.assertIn('shoes_image_url', result)
+        self.assertEqual(result['shoes_image_url'], self.shoes_product.image_url)
+
+    @override_settings(MEDIA_URL='/media/')
+    def test_retrieve_uses_fresh_uploaded_image_url_for_snapshots(self):
+        published = self.create_outfit(
+            self.user,
+            status_value=Outfit.Status.PUBLISHED,
+            title='Snapshot Refresh Fit',
+        )
+        self.shoes_product.uploaded_image = SimpleUploadedFile(
+            'shoe.jpg',
+            b'not-a-real-image-but-good-enough-for-storage',
+            content_type='image/jpeg',
+        )
+        self.shoes_product.save(update_fields=['uploaded_image'])
+
+        OutfitItem.objects.create(
+            outfit=published,
+            slot=OutfitItem.Slot.SHOES,
+            product=self.shoes_product,
+            product_name=self.shoes_product.name,
+            image_url_used='https://example.com/stale-shoes.jpg',
+            product_url=self.shoes_product.product_url,
+            store_name=self.shoes_product.store.name,
+            store_slug=self.shoes_product.store.slug,
+            price=self.shoes_product.price,
+            currency=self.shoes_product.currency,
+        )
+
+        self.client.force_authenticate(user=self.other_user)
+        response = self.client.get(f'/api/outfits/{published.uuid}/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['items']), 1)
+        self.assertIn('/media/', response.data['items'][0]['image_url_used'])
 
     def test_explore_supports_search_and_store_filter(self):
         outfit_one = self.create_outfit(

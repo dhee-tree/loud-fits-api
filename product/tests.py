@@ -1,3 +1,4 @@
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.test.client import RequestFactory
 from rest_framework.test import APIClient
@@ -115,7 +116,7 @@ class ProductBrowseTests(TestCase):
             store=self.store_two,
             external_id="P-005",
             name="White Trainers",
-            category="bottom",
+            category="shoes",
             image_url="https://example.com/trainers.jpg",
             price=89.99,
             currency="GBP",
@@ -153,6 +154,12 @@ class ProductBrowseTests(TestCase):
         response = self.client.get(f"{self.url}?category=bottom")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         external_ids = {item["external_id"] for item in response.data["results"]}
+        self.assertSetEqual(external_ids, set())
+
+    def test_filter_by_shoes_category(self):
+        response = self.client.get(f"{self.url}?category=shoes")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        external_ids = {item["external_id"] for item in response.data["results"]}
         self.assertSetEqual(external_ids, {"P-005"})
 
     def test_search_by_name(self):
@@ -187,7 +194,59 @@ class ProductBrowseTests(TestCase):
             products_by_external_id["P-001"]["product_url"],
             "https://example.com/blue",
         )
+        self.assertIn("tryon_asset_url", products_by_external_id["P-001"])
         self.assertEqual(
             products_by_external_id["P-001"]["tryon_template_key"],
             "top_basic_tee",
         )
+
+
+class ProductTryOnAssetTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+        owner = User.objects.create_user(
+            email="owner@example.com",
+            password="testpass123",
+            account_type=User.AccountType.STORE,
+        )
+        self.store = Store.objects.create(
+            owner=owner,
+            name="Store One",
+            slug="store-one",
+        )
+        self.product = Product.objects.create(
+            store=self.store,
+            external_id="P-TRYON-001",
+            name="Blue Tee",
+            category="top",
+            image_url="https://example.com/blue.jpg",
+            price=19.99,
+            currency="GBP",
+            product_url="https://example.com/blue",
+            is_active=True,
+            stock_status=StockStatus.IN_STOCK,
+            stock_quantity=8,
+        )
+        self.product.tryon_asset = SimpleUploadedFile(
+            "product.glb",
+            b"glTF" + b"\x02\x00\x00\x00" + b"\x00" * 16,
+            content_type="model/gltf-binary",
+        )
+        self.product.save(update_fields=["tryon_asset"])
+        self.url = f"/api/products/{self.product.uuid}/tryon-asset/"
+
+    def test_tryon_asset_endpoint_streams_glb(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Content-Type"], "model/gltf-binary")
+
+    def test_tryon_asset_endpoint_returns_404_when_missing(self):
+        self.product.tryon_asset.delete(save=False)
+        self.product.tryon_asset = None
+        self.product.save(update_fields=["tryon_asset"])
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
