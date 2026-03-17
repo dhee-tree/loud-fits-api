@@ -38,6 +38,21 @@ class ProductListView(generics.ListAPIView):
         return queryset
 
 
+class ProductDetailView(generics.RetrieveAPIView):
+    """
+    GET /api/products/<uuid>/
+
+    Public product detail endpoint.
+    """
+    permission_classes = [permissions.AllowAny]
+    serializer_class = ProductBrowseSerializer
+    lookup_field = "uuid"
+    lookup_url_kwarg = "product_uuid"
+
+    def get_queryset(self):
+        return Product.objects.select_related("store").filter(is_active=True)
+
+
 class ProductTryOnAssetView(APIView):
     """
     GET /api/products/<uuid>/tryon-asset/
