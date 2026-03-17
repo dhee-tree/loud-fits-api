@@ -353,3 +353,91 @@ class StoreRegistrationTests(AuthTestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('email', response.data)
+
+
+class ChangePasswordTests(AuthTestCase):
+    """Tests for the change password endpoint."""
+
+    def setUp(self):
+        super().setUp()
+        self.url = '/api/auth/change-password/'
+        self.user = self.create_test_user()
+        self.client.force_authenticate(user=self.user)
+
+    def test_change_password_success(self):
+        """Test successful password change."""
+        data = {
+            'current_password': 'testpassword123',
+            'new_password': 'newsecurepassword456',
+            'new_password_confirm': 'newsecurepassword456',
+        }
+
+        response = self.client.post(self.url, data)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['detail'], 'Password updated successfully.')
+
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('newsecurepassword456'))
+
+    def test_change_password_wrong_current(self):
+        """Test change password fails with wrong current password."""
+        data = {
+            'current_password': 'wrongpassword',
+            'new_password': 'newsecurepassword456',
+            'new_password_confirm': 'newsecurepassword456',
+        }
+
+        response = self.client.post(self.url, data)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('current_password', response.data)
+
+    def test_change_password_mismatch(self):
+        """Test change password fails when new passwords do not match."""
+        data = {
+            'current_password': 'testpassword123',
+            'new_password': 'newsecurepassword456',
+            'new_password_confirm': 'differentpassword789',
+        }
+
+        response = self.client.post(self.url, data)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('new_password_confirm', response.data)
+
+    def test_change_password_too_short(self):
+        """Test change password fails when new password is too short."""
+        data = {
+            'current_password': 'testpassword123',
+            'new_password': 'short',
+            'new_password_confirm': 'short',
+        }
+
+        response = self.client.post(self.url, data)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('new_password', response.data)
+
+    def test_change_password_missing_fields(self):
+        """Test change password fails when fields are missing."""
+        response = self.client.post(self.url, {})
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('current_password', response.data)
+        self.assertIn('new_password', response.data)
+        self.assertIn('new_password_confirm', response.data)
+
+    def test_change_password_unauthenticated(self):
+        """Test change password fails without authentication."""
+        self.client.force_authenticate(user=None)
+
+        data = {
+            'current_password': 'testpassword123',
+            'new_password': 'newsecurepassword456',
+            'new_password_confirm': 'newsecurepassword456',
+        }
+
+        response = self.client.post(self.url, data)
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)

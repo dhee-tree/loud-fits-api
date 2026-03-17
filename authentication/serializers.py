@@ -91,3 +91,24 @@ class StoreRegisterSerializer(serializers.Serializer):
         )
 
         return user
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    """
+    Serializer for changing a user's password.
+    """
+    current_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True, min_length=8)
+    new_password_confirm = serializers.CharField(write_only=True)
+
+    def validate_current_password(self, value):
+        user = self.context['request'].user
+        if not user.check_password(value):
+            raise serializers.ValidationError("Current password is incorrect.")
+        return value
+
+    def validate(self, attrs):
+        if attrs['new_password'] != attrs['new_password_confirm']:
+            raise serializers.ValidationError(
+                {"new_password_confirm": "New passwords do not match."})
+        return attrs

@@ -3,7 +3,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.conf import settings
-from .serializers import GoogleLoginSerializer, RegisterSerializer, StoreRegisterSerializer
+from .serializers import GoogleLoginSerializer, RegisterSerializer, StoreRegisterSerializer, ChangePasswordSerializer
 from google.oauth2 import id_token
 from google.auth.transport import requests
 from user.models import User
@@ -188,3 +188,21 @@ class GoogleLoginView(APIView):
                 {"error": f"Authentication failed: {str(e)}"},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+
+class ChangePasswordView(APIView):
+    """
+    API endpoint for changing the authenticated user's password.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(
+            data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        request.user.set_password(serializer.validated_data['new_password'])
+        request.user.save()
+        return Response(
+            {"detail": "Password updated successfully."},
+            status=status.HTTP_200_OK
+        )
