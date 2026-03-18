@@ -952,3 +952,142 @@ class OutfitSaveTests(TestCase):
         uuids = [r['uuid'] for r in response.data['results']]
         self.assertIn(str(self.published_outfit.uuid), uuids)
         self.assertNotIn(str(unsaved_outfit.uuid), uuids)
+
+
+class OutfitOccasionTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+        self.user = User.objects.create_user(
+            email='occasion@example.com',
+            password='testpass123',
+            account_type=User.AccountType.USER,
+        )
+
+        self.store_owner = User.objects.create_user(
+            email='store_occasion@example.com',
+            password='testpass123',
+            account_type=User.AccountType.STORE,
+        )
+        self.store = Store.objects.create(
+            owner=self.store_owner,
+            name='Occasion Store',
+            slug='occasion-store',
+        )
+        self.top_product = Product.objects.create(
+            store=self.store,
+            external_id='OCC-TOP-001',
+            name='Occasion Top',
+            category='top',
+            image_url='https://example.com/occ-top.jpg',
+            price=30.00,
+            currency='GBP',
+            product_url='https://example.com/occ-top',
+            is_active=True,
+            stock_status=StockStatus.IN_STOCK,
+            stock_quantity=10,
+        )
+        self.bottom_product = Product.objects.create(
+            store=self.store,
+            external_id='OCC-BOT-001',
+            name='Occasion Bottom',
+            category='bottom',
+            image_url='https://example.com/occ-bottom.jpg',
+            price=40.00,
+            currency='GBP',
+            product_url='https://example.com/occ-bottom',
+            is_active=True,
+            stock_status=StockStatus.IN_STOCK,
+            stock_quantity=10,
+        )
+
+    def _create_published_outfit(self, owner, title='', occasion=None):
+        outfit = Outfit.objects.create(
+            owner=owner,
+            status=Outfit.Status.PUBLISHED,
+            title=title,
+            occasion=occasion,
+            published_at=timezone.now(),
+        )
+        OutfitItem.objects.create(
+            outfit=outfit,
+            slot=OutfitItem.Slot.TOP,
+            product=self.top_product,
+            product_name=self.top_product.name,
+            image_url_used=self.top_product.image_url,
+            product_url=self.top_product.product_url,
+            store_name=self.store.name,
+            store_slug=self.store.slug,
+            price=self.top_product.price,
+            currency=self.top_product.currency,
+        )
+        OutfitItem.objects.create(
+            outfit=outfit,
+            slot=OutfitItem.Slot.BOTTOM,
+            product=self.bottom_product,
+            product_name=self.bottom_product.name,
+            image_url_used=self.bottom_product.image_url,
+            product_url=self.bottom_product.product_url,
+            store_name=self.store.name,
+            store_slug=self.store.slug,
+            price=self.bottom_product.price,
+            currency=self.bottom_product.currency,
+        )
+        return outfit
+
+    def test_create_outfit_with_occasion(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            '/api/outfits/',
+            {'title': 'Wedding Fit', 'occasion': 'Wedding'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['occasion'], 'Wedding')
+        outfit = Outfit.objects.get(uuid=response.data['uuid'])
+        self.assertEqual(outfit.occasion, 'Wedding')
+
+    def test_update_outfit_occasion(self):
+        self.client.force_authenticate(user=self.user)
+        outfit = Outfit.objects.create(
+            owner=self.user,
+            status=Outfit.Status.DRAFT,
+            title='Draft Fit',
+        )
+
+        response = self.client.patch(
+            f'/api/outfits/{outfit.uuid}/',
+            {'occasion': 'Party'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        outfit.refresh_from_db()
+        self.assertEqual(outfit.occasion, 'Party')
+        self.assertEqual(response.data['occasion'], 'Party')
+
+    def test_explore_filter_by_occasion(self):
+        self._create_published_outfit(self.user, 'Wedding Fit', occasion='Wedding')
+        self._create_published_outfit(self.user, 'Party Fit', occasion='Party')
+        self._create_published_outfit(self.user, 'Casual Fit', occasion='Casual')
+
+        response = self.client.get('/api/explore/outfits/?occasion=Wedding')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['title'], 'Wedding Fit')
+        self.assertEqual(response.data['results'][0]['occasion'], 'Wedding')
+
+    def test_occasion_optional(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            '/api/outfits/',
+            {'title': 'No Occasion Fit'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIsNone(response.data['occasion'])
+        outfit = Outfit.objects.get(uuid=response.data['uuid'])
+        self.assertIsNone(outfit.occasion)

@@ -9,6 +9,7 @@ from .views import (
     OutfitPublishView,
     OutfitSaveView,
     OutfitSlotItemView,
+    OutfitUnpublishView,
 )
 
 
@@ -17,6 +18,7 @@ urlpatterns = [
     path('current-draft/', CurrentDraftView.as_view(), name='current_draft'),
     path('<uuid:outfit_uuid>/', OutfitDetailView.as_view(), name='outfit_detail'),
     path('<uuid:outfit_uuid>/publish/', OutfitPublishView.as_view(), name='outfit_publish'),
+    path('<uuid:outfit_uuid>/unpublish/', OutfitUnpublishView.as_view(), name='outfit_unpublish'),
     path(
         '<uuid:outfit_uuid>/moderation/',
         OutfitModerationView.as_view(),

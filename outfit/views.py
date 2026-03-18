@@ -112,12 +112,6 @@ class OutfitDetailView(APIView):
         outfit = self.get_object(outfit_uuid)
         self.ensure_owner(outfit, request.user)
 
-        if outfit.status != Outfit.Status.DRAFT:
-            return Response(
-                {'status': ['Only draft outfits can be updated.']},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         serializer = OutfitMetadataUpdateSerializer(
             outfit,
             data=request.data,
@@ -135,13 +129,6 @@ class OutfitDetailView(APIView):
     def delete(self, request, outfit_uuid):
         outfit = self.get_object(outfit_uuid)
         self.ensure_owner(outfit, request.user)
-
-        if outfit.status != Outfit.Status.DRAFT:
-            return Response(
-                {'status': ['Only draft outfits can be deleted.']},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         outfit.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -262,6 +249,29 @@ class OutfitPublishView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+class OutfitUnpublishView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, outfit_uuid):
+        outfit = get_object_or_404(
+            Outfit.objects.prefetch_related('items__product__store').select_related('owner'),
+            uuid=outfit_uuid,
+            owner=request.user,
+        )
+
+        if outfit.status != Outfit.Status.PUBLISHED:
+            return Response(
+                {'status': ['Only published outfits can be unpublished.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        outfit.status = Outfit.Status.DRAFT
+        outfit.save(update_fields=['status', 'updated_at'])
+
+        serializer = OutfitDetailSerializer(outfit, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
 class ExploreOutfitListView(generics.ListAPIView):
     permission_classes = [permissions.AllowAny]
     serializer_class = ExploreOutfitSerializer
@@ -289,6 +299,10 @@ class ExploreOutfitListView(generics.ListAPIView):
             slugs = [value.strip() for value in store_filter.split(',') if value.strip()]
             if slugs:
                 queryset = queryset.filter(items__store_slug__in=slugs).distinct()
+
+        occasion = self.request.query_params.get('occasion', '').strip()
+        if occasion:
+            queryset = queryset.filter(occasion=occasion)
 
         return queryset.order_by('-published_at', '-updated_at')
 

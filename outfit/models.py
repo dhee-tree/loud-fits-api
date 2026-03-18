@@ -10,6 +10,18 @@ class Outfit(models.Model):
         DRAFT = 'draft', 'Draft'
         PUBLISHED = 'published', 'Published'
 
+    class Occasion(models.TextChoices):
+        CASUAL = 'Casual', 'Casual'
+        SMART_CASUAL = 'Smart Casual', 'Smart Casual'
+        FORMAL = 'Formal', 'Formal'
+        WEDDING = 'Wedding', 'Wedding'
+        PARTY = 'Party', 'Party'
+        BIRTHDAY = 'Birthday', 'Birthday'
+        DATE_NIGHT = 'Date Night', 'Date Night'
+        WORK = 'Work', 'Work'
+        FESTIVAL = 'Festival', 'Festival'
+        OTHER = 'Other', 'Other'
+
     uuid = models.UUIDField(
         primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(
@@ -24,6 +36,12 @@ class Outfit(models.Model):
     )
     title = models.CharField(max_length=255, blank=True, default='')
     notes = models.TextField(blank=True, default='')
+    occasion = models.CharField(
+        max_length=20,
+        choices=Occasion.choices,
+        blank=True,
+        null=True,
+    )
     published_at = models.DateTimeField(null=True, blank=True)
     is_hidden = models.BooleanField(default=False)
     hidden_reason = models.TextField(null=True, blank=True)

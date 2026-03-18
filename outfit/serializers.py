@@ -60,6 +60,7 @@ class OutfitDetailSerializer(serializers.ModelSerializer):
     is_liked = serializers.SerializerMethodField()
     is_saved = serializers.SerializerMethodField()
     like_count = serializers.SerializerMethodField()
+    is_owner = serializers.SerializerMethodField()
 
     class Meta:
         model = Outfit
@@ -69,6 +70,7 @@ class OutfitDetailSerializer(serializers.ModelSerializer):
             'status',
             'title',
             'notes',
+            'occasion',
             'created_at',
             'updated_at',
             'published_at',
@@ -78,6 +80,7 @@ class OutfitDetailSerializer(serializers.ModelSerializer):
             'is_liked',
             'is_saved',
             'like_count',
+            'is_owner',
         ]
 
     def get_creator(self, obj):
@@ -102,6 +105,12 @@ class OutfitDetailSerializer(serializers.ModelSerializer):
     def get_like_count(self, obj):
         return obj.likes.count()
 
+    def get_is_owner(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return obj.owner_id == request.user.uuid
+
 
 class ExploreOutfitSerializer(serializers.ModelSerializer):
     creator = serializers.SerializerMethodField()
@@ -117,6 +126,7 @@ class ExploreOutfitSerializer(serializers.ModelSerializer):
         fields = [
             'uuid',
             'title',
+            'occasion',
             'published_at',
             'creator',
             'top_image_url',
@@ -176,10 +186,11 @@ class ExploreOutfitSerializer(serializers.ModelSerializer):
 class OutfitCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Outfit
-        fields = ['title', 'notes']
+        fields = ['title', 'notes', 'occasion']
         extra_kwargs = {
             'title': {'required': False, 'allow_blank': True},
             'notes': {'required': False, 'allow_blank': True},
+            'occasion': {'required': False, 'allow_null': True},
         }
 
     def create(self, validated_data):
@@ -194,10 +205,11 @@ class OutfitCreateSerializer(serializers.ModelSerializer):
 class OutfitMetadataUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Outfit
-        fields = ['title', 'notes']
+        fields = ['title', 'notes', 'occasion']
         extra_kwargs = {
             'title': {'required': False, 'allow_blank': True},
             'notes': {'required': False, 'allow_blank': True},
+            'occasion': {'required': False, 'allow_null': True},
         }
 
 
