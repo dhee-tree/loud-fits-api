@@ -191,6 +191,12 @@ To audit the codebase for security vulnerabilities we use `pip-audit`. To run an
 pip-audit
 ```
 
+To fix any vulnerabilities that are found, you can use the `--fix` option:
+
+```bash
+pip-audit --fix
+```
+
 This will scan the installed packages in your environment and report any known vulnerabilities.
 More information can be found in the [pip-audit documentation](https://pypi.org/project/pip-audit/).
 

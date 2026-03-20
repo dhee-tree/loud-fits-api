@@ -1,5 +1,5 @@
 [run]
-source = authentication,user,api
+source = .
 omit = 
     */migrations/*
     */tests.py

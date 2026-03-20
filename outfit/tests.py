@@ -263,19 +263,19 @@ class OutfitApiTests(TestCase):
         self.assertEqual(draft.title, 'Updated')
         self.assertEqual(draft.notes, 'Updated note')
 
-    def test_patch_rejects_published_outfit(self):
+    def test_patch_allows_published_outfit(self):
         published = self.create_outfit(
             self.user, status_value=Outfit.Status.PUBLISHED)
         self.client.force_authenticate(user=self.user)
 
         response = self.client.patch(
             f'/api/outfits/{published.uuid}/',
-            {'title': 'Should fail'},
+            {'title': 'Updated title'},
             format='json',
         )
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('status', response.data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['title'], 'Updated title')
 
     def test_delete_draft_removes_items(self):
         draft = self.create_outfit(self.user, status_value=Outfit.Status.DRAFT)
@@ -288,15 +288,15 @@ class OutfitApiTests(TestCase):
         self.assertFalse(Outfit.objects.filter(uuid=draft.uuid).exists())
         self.assertEqual(OutfitItem.objects.filter(outfit=draft).count(), 0)
 
-    def test_delete_rejects_published_outfit(self):
+    def test_delete_allows_published_outfit(self):
         published = self.create_outfit(
             self.user, status_value=Outfit.Status.PUBLISHED)
         self.client.force_authenticate(user=self.user)
 
         response = self.client.delete(f'/api/outfits/{published.uuid}/')
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertTrue(Outfit.objects.filter(uuid=published.uuid).exists())
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Outfit.objects.filter(uuid=published.uuid).exists())
 
     def test_set_slot_item_creates_snapshot(self):
         draft = self.create_outfit(self.user, status_value=Outfit.Status.DRAFT)
