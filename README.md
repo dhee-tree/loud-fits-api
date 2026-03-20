@@ -15,13 +15,14 @@ To set up the Loud Fits API locally, follow these steps:
 
     ```bash
     python -m venv venv
-    venv\Scripts\activate
+    source venv/Scripts/activate  # On Windows
     
     # On macOS/Linux
     source venv/bin/activate 
     ```
 
     Optionally, upgrade pip:
+
     ```bash
     pip install --upgrade pip
     ```
@@ -49,6 +50,73 @@ To set up the Loud Fits API locally, follow these steps:
     ```bash
     python manage.py runserver
     ```
+
+## Running with Docker
+
+The API can be run fully in Docker or with just the database in Docker and Django running locally.
+
+### Docker Environment Variables
+
+Docker Compose uses the following env vars (all have sensible defaults):
+
+| Variable             | Default          | Description              |
+| -------------------- | ---------------- | ------------------------ |
+| `DB_CONTAINER_NAME`  | `loud_fits_db`   | Postgres container name  |
+| `DB_NAME`            | `loud_fits`      | Database name            |
+| `DB_USER`            | `loud_fits_user` | Database user            |
+| `DB_PASSWORD`        | `loud_fits_pass` | Database password        |
+| `API_CONTAINER_NAME` | `loud_fits_api`  | API container name       |
+| `API_APP_PORT`       | `8000`           | Host port for the API    |
+
+### Full Stack (API + Database)
+
+Runs both the API and Postgres in Docker:
+
+```bash
+docker compose up -d --build
+```
+
+The API will be available at `http://localhost:8000`.
+
+To stop all services:
+
+```bash
+docker compose down
+```
+
+### Database Only (Local Development)
+
+Runs just Postgres in Docker so you can run Django locally against it:
+
+```bash
+docker compose up -d db
+```
+
+Then add the following to your `.env`:
+
+```env
+DATABASE_ENGINE=django.db.backends.postgresql
+DATABASE_NAME=loud_fits
+DATABASE_USER=loud_fits_user
+DATABASE_PASSWORD=loud_fits_pass
+DATABASE_HOST=localhost
+DATABASE_PORT=5432
+```
+
+And run the server as normal:
+
+```bash
+python manage.py migrate
+python manage.py runserver
+```
+
+To stop the database:
+
+```bash
+docker compose down
+```
+
+> **Note:** When no `DATABASE_ENGINE` is set, the API falls back to SQLite — no Docker required.
 
 ## Add New Dependencies
 

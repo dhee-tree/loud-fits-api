@@ -95,13 +95,28 @@ WSGI_APPLICATION = 'loud_fits_api.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
+# Uses PostgreSQL when DATABASE_ENGINE is set (Docker), otherwise falls back to SQLite.
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+DATABASE_ENGINE = config('DATABASE_ENGINE', default='django.db.backends.sqlite3')
+
+if DATABASE_ENGINE == 'django.db.backends.postgresql':
+    DATABASES = {
+        'default': {
+            'ENGINE': DATABASE_ENGINE,
+            'NAME': config('DATABASE_NAME', default='loud_fits'),
+            'USER': config('DATABASE_USER', default='loud_fits_user'),
+            'PASSWORD': config('DATABASE_PASSWORD', default='loud_fits_pass'),
+            'HOST': config('DATABASE_HOST', default='localhost'),
+            'PORT': config('DATABASE_PORT', default='5432'),
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 
 # Password validation

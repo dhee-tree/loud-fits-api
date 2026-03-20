@@ -17,6 +17,8 @@ djangorestframework==3.16.1
 djangorestframework_simplejwt==5.5.1
 filelock==3.20.3
 google-auth==2.45.0
+gunicorn==23.0.0
+psycopg[binary]==3.2.9
 idna==3.11
 jmespath==1.1.0
 license-expression==30.4.4
