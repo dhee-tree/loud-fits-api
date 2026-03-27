@@ -59,6 +59,11 @@ INSTALLED_APPS = [
     'product',
     'outfit',
     'avatar',
+    'cart',
+    'order',
+    'address',
+    'wardrobe',
+    'payment',
 ]
 
 MIDDLEWARE = [
