@@ -7,7 +7,7 @@ from rest_framework.test import APIClient
 from product.models import Product, StockStatus
 from store.models import Store
 from user.models import User
-from .models import Outfit, OutfitItem, OutfitLike, OutfitSave
+from .models import Outfit, OutfitItem, OutfitLike, OutfitSave, OutfitTryOn, OutfitView
 
 
 class OutfitApiTests(TestCase):
@@ -1091,3 +1091,257 @@ class OutfitOccasionTests(TestCase):
         self.assertIsNone(response.data['occasion'])
         outfit = Outfit.objects.get(uuid=response.data['uuid'])
         self.assertIsNone(outfit.occasion)
+
+
+class OutfitViewTrackTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(email='viewer@example.com', password='testpass123')
+        self.other_user = User.objects.create_user(email='creator@example.com', password='testpass123')
+        self.store = Store.objects.create(owner=self.other_user, name='View Store', slug='view-store')
+        self.top_product = Product.objects.create(
+            store=self.store, external_id='VIEW-TOP-001', name='View Top',
+            category='top', image_url='https://example.com/top.jpg',
+            price=30.00, currency='GBP', is_active=True,
+            stock_status=StockStatus.IN_STOCK, stock_quantity=10,
+        )
+        self.bottom_product = Product.objects.create(
+            store=self.store, external_id='VIEW-BOT-001', name='View Bottom',
+            category='bottom', image_url='https://example.com/bottom.jpg',
+            price=40.00, currency='GBP', is_active=True,
+            stock_status=StockStatus.IN_STOCK, stock_quantity=10,
+        )
+        self.outfit = Outfit.objects.create(
+            owner=self.other_user, status=Outfit.Status.PUBLISHED,
+            title='Viewable Fit', published_at=timezone.now(),
+        )
+        OutfitItem.objects.create(
+            outfit=self.outfit, slot=OutfitItem.Slot.TOP, product=self.top_product,
+            product_name=self.top_product.name, image_url_used=self.top_product.image_url,
+            store_name=self.store.name, store_slug=self.store.slug,
+            price=self.top_product.price, currency=self.top_product.currency,
+        )
+        OutfitItem.objects.create(
+            outfit=self.outfit, slot=OutfitItem.Slot.BOTTOM, product=self.bottom_product,
+            product_name=self.bottom_product.name, image_url_used=self.bottom_product.image_url,
+            store_name=self.store.name, store_slug=self.store.slug,
+            price=self.bottom_product.price, currency=self.bottom_product.currency,
+        )
+
+    def test_view_track_authenticated(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(f'/api/outfits/{self.outfit.uuid}/view/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['recorded'])
+        self.assertEqual(OutfitView.objects.filter(outfit=self.outfit).count(), 1)
+
+    def test_view_track_anonymous_with_session(self):
+        response = self.client.post(f'/api/outfits/{self.outfit.uuid}/view/', {'session_id': 'abc123'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['recorded'])
+
+    def test_view_track_deduplication(self):
+        self.client.force_authenticate(user=self.user)
+        self.client.post(f'/api/outfits/{self.outfit.uuid}/view/')
+        response = self.client.post(f'/api/outfits/{self.outfit.uuid}/view/')
+        self.assertFalse(response.data['recorded'])
+        self.assertEqual(OutfitView.objects.filter(outfit=self.outfit).count(), 1)
+
+    def test_view_track_unpublished_404(self):
+        draft = Outfit.objects.create(owner=self.other_user, status=Outfit.Status.DRAFT, title='Draft')
+        response = self.client.post(f'/api/outfits/{draft.uuid}/view/')
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class OutfitTryOnTrackTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(email='tryer@example.com', password='testpass123')
+        self.other_user = User.objects.create_user(email='creator2@example.com', password='testpass123')
+        self.store = Store.objects.create(owner=self.other_user, name='TryOn Store', slug='tryon-store')
+        self.top_product = Product.objects.create(
+            store=self.store, external_id='TRY-TOP-001', name='Try Top',
+            category='top', image_url='https://example.com/try-top.jpg',
+            price=30.00, currency='GBP', is_active=True,
+            stock_status=StockStatus.IN_STOCK, stock_quantity=10,
+        )
+        self.bottom_product = Product.objects.create(
+            store=self.store, external_id='TRY-BOT-001', name='Try Bottom',
+            category='bottom', image_url='https://example.com/try-bottom.jpg',
+            price=40.00, currency='GBP', is_active=True,
+            stock_status=StockStatus.IN_STOCK, stock_quantity=10,
+        )
+        self.outfit = Outfit.objects.create(
+            owner=self.other_user, status=Outfit.Status.PUBLISHED,
+            title='Tryable Fit', published_at=timezone.now(),
+        )
+        OutfitItem.objects.create(
+            outfit=self.outfit, slot=OutfitItem.Slot.TOP, product=self.top_product,
+            product_name=self.top_product.name, image_url_used=self.top_product.image_url,
+            store_name=self.store.name, store_slug=self.store.slug,
+            price=self.top_product.price, currency=self.top_product.currency,
+        )
+        OutfitItem.objects.create(
+            outfit=self.outfit, slot=OutfitItem.Slot.BOTTOM, product=self.bottom_product,
+            product_name=self.bottom_product.name, image_url_used=self.bottom_product.image_url,
+            store_name=self.store.name, store_slug=self.store.slug,
+            price=self.bottom_product.price, currency=self.bottom_product.currency,
+        )
+
+    def test_tryon_track_success(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(f'/api/outfits/{self.outfit.uuid}/tryon-track/')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(response.data['recorded'])
+
+    def test_tryon_track_unauthenticated(self):
+        response = self.client.post(f'/api/outfits/{self.outfit.uuid}/tryon-track/')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_tryon_track_unpublished_404(self):
+        draft = Outfit.objects.create(owner=self.other_user, status=Outfit.Status.DRAFT, title='Draft')
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(f'/api/outfits/{draft.uuid}/tryon-track/')
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class TrendingOutfitTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(email='trendy@example.com', password='testpass123')
+        self.store = Store.objects.create(owner=self.user, name='Trend Store', slug='trend-store')
+        self.top_product = Product.objects.create(
+            store=self.store, external_id='TREND-TOP-001', name='Trend Top',
+            category='top', image_url='https://example.com/trend-top.jpg',
+            price=30.00, currency='GBP', is_active=True,
+            stock_status=StockStatus.IN_STOCK, stock_quantity=10,
+        )
+        self.bottom_product = Product.objects.create(
+            store=self.store, external_id='TREND-BOT-001', name='Trend Bottom',
+            category='bottom', image_url='https://example.com/trend-bottom.jpg',
+            price=40.00, currency='GBP', is_active=True,
+            stock_status=StockStatus.IN_STOCK, stock_quantity=10,
+        )
+
+    def _create_published_outfit(self, title=''):
+        outfit = Outfit.objects.create(
+            owner=self.user, status=Outfit.Status.PUBLISHED,
+            title=title, published_at=timezone.now(),
+        )
+        OutfitItem.objects.create(
+            outfit=outfit, slot=OutfitItem.Slot.TOP, product=self.top_product,
+            product_name=self.top_product.name, image_url_used=self.top_product.image_url,
+            store_name=self.store.name, store_slug=self.store.slug,
+            price=self.top_product.price, currency=self.top_product.currency,
+        )
+        OutfitItem.objects.create(
+            outfit=outfit, slot=OutfitItem.Slot.BOTTOM, product=self.bottom_product,
+            product_name=self.bottom_product.name, image_url_used=self.bottom_product.image_url,
+            store_name=self.store.name, store_slug=self.store.slug,
+            price=self.bottom_product.price, currency=self.bottom_product.currency,
+        )
+        return outfit
+
+    def test_trending_endpoint_accessible(self):
+        self._create_published_outfit('Trending Outfit')
+        response = self.client.get('/api/explore/outfits/trending/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsInstance(response.data, list)
+        self.assertGreaterEqual(len(response.data), 1)
+
+    def test_trending_returns_most_engaged(self):
+        popular = self._create_published_outfit('Popular')
+        unpopular = self._create_published_outfit('Unpopular')
+
+        for i in range(5):
+            u = User.objects.create_user(email=f'liker{i}@example.com', password='testpass123')
+            OutfitLike.objects.create(user=u, outfit=popular)
+
+        response = self.client.get('/api/explore/outfits/trending/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        uuids = [item['uuid'] for item in response.data]
+        self.assertEqual(uuids[0], str(popular.uuid))
+
+
+class RecommendedOutfitTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(email='reco@example.com', password='testpass123')
+        self.creator = User.objects.create_user(email='creator_reco@example.com', password='testpass123')
+        self.store = Store.objects.create(owner=self.creator, name='Reco Store', slug='reco-store')
+        self.product = Product.objects.create(
+            store=self.store, external_id='RECOM-001', name='Blue Slim Jeans',
+            category='bottom', image_url='https://example.com/jeans.jpg',
+            price=45.00, currency='GBP', is_active=True,
+            stock_status=StockStatus.IN_STOCK, stock_quantity=10,
+        )
+        self.top_product = Product.objects.create(
+            store=self.store, external_id='RECOM-002', name='White Cotton Tee',
+            category='top', image_url='https://example.com/tee.jpg',
+            price=25.00, currency='GBP', is_active=True,
+            stock_status=StockStatus.IN_STOCK, stock_quantity=10,
+        )
+
+    def _create_outfit_with_products(self, owner, title, products, occasion=None):
+        outfit = Outfit.objects.create(
+            owner=owner, status=Outfit.Status.PUBLISHED,
+            title=title, published_at=timezone.now(), occasion=occasion,
+        )
+        for product in products:
+            slot = product.category
+            OutfitItem.objects.create(
+                outfit=outfit, slot=slot, product=product,
+                product_name=product.name, image_url_used=product.image_url,
+                store_name=self.store.name, store_slug=self.store.slug,
+                price=product.price, currency=product.currency,
+            )
+        return outfit
+
+    def test_recommended_anonymous_returns_trending(self):
+        self._create_outfit_with_products(self.creator, 'Trending Fit', [self.product, self.top_product])
+        response = self.client.get('/api/explore/outfits/recommended/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_recommended_no_history_returns_trending(self):
+        self.client.force_authenticate(user=self.user)
+        self._create_outfit_with_products(self.creator, 'Some Fit', [self.product, self.top_product])
+        response = self.client.get('/api/explore/outfits/recommended/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_recommended_based_on_liked_products(self):
+        self.client.force_authenticate(user=self.user)
+
+        liked_outfit = self._create_outfit_with_products(self.creator, 'Liked Fit', [self.product, self.top_product])
+        OutfitLike.objects.create(user=self.user, outfit=liked_outfit)
+
+        similar_outfit = self._create_outfit_with_products(self.creator, 'Similar Fit', [self.product])
+
+        other_product = Product.objects.create(
+            store=self.store, external_id='RECOM-003', name='Red Formal Blazer',
+            category='top', image_url='https://example.com/blazer.jpg',
+            price=120.00, currency='GBP', is_active=True,
+            stock_status=StockStatus.IN_STOCK, stock_quantity=10,
+        )
+        unrelated_outfit = self._create_outfit_with_products(self.creator, 'Unrelated Fit', [other_product])
+
+        response = self.client.get('/api/explore/outfits/recommended/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        uuids = [r['uuid'] for r in response.data]
+        if len(uuids) >= 2:
+            self.assertIn(str(similar_outfit.uuid), uuids)
+            sim_idx = uuids.index(str(similar_outfit.uuid))
+            if str(unrelated_outfit.uuid) in uuids:
+                unrel_idx = uuids.index(str(unrelated_outfit.uuid))
+                self.assertLess(sim_idx, unrel_idx)
+
+    def test_recommended_includes_reason(self):
+        self.client.force_authenticate(user=self.user)
+        liked_outfit = self._create_outfit_with_products(self.creator, 'Liked', [self.product])
+        OutfitLike.objects.create(user=self.user, outfit=liked_outfit)
+        self._create_outfit_with_products(self.creator, 'Candidate', [self.product])
+
+        response = self.client.get('/api/explore/outfits/recommended/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        if response.data:
+            self.assertIn('recommendation_reason', response.data[0])

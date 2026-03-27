@@ -1,3 +1,4 @@
+import uuid as uuid_module
 from rest_framework import generics, permissions, status
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.views import APIView
@@ -152,9 +153,13 @@ class GoogleLoginView(APIView):
 
             # Create or get user
             user, created = User.objects.get_or_create(
-                username=email,
-                defaults={'email': email, 'first_name': first_name,
-                          'last_name': last_name, 'google_id': google_id}
+                email=email,
+                defaults={
+                    'username': f"user_{uuid_module.uuid4().hex[:8]}",
+                    'first_name': first_name,
+                    'last_name': last_name,
+                    'google_id': google_id,
+                }
             )
 
             if not created:

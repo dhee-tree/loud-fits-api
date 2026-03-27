@@ -64,7 +64,7 @@ class GoogleAuthTests(AuthTestCase):
         # Verify user created
         user = User.objects.get(email='test@example.com')
         self.assertIsNotNone(user)
-        self.assertEqual(user.username, 'test@example.com')
+        self.assertTrue(user.username.startswith('user_'))
 
     @override_settings(ENABLE_GOOGLE_AUTH=True)
     @patch('authentication.views.id_token.verify_oauth2_token')
@@ -106,7 +106,7 @@ class RegistrationTests(AuthTestCase):
 
         # Verify user was created in database
         user = User.objects.get(email='newuser@example.com')
-        self.assertEqual(user.username, 'newuser@example.com')
+        self.assertTrue(user.username.startswith('user_'))
         self.assertEqual(user.first_name, 'New')
         self.assertEqual(user.last_name, 'User')
 

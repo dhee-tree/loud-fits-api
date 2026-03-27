@@ -9,7 +9,9 @@ from .views import (
     OutfitPublishView,
     OutfitSaveView,
     OutfitSlotItemView,
+    OutfitTryOnTrackView,
     OutfitUnpublishView,
+    OutfitViewTrackView,
 )
 
 
@@ -31,4 +33,6 @@ urlpatterns = [
     ),
     path('<uuid:outfit_uuid>/like/', OutfitLikeView.as_view(), name='outfit_like'),
     path('<uuid:outfit_uuid>/save/', OutfitSaveView.as_view(), name='outfit_save'),
+    path('<uuid:outfit_uuid>/view/', OutfitViewTrackView.as_view(), name='outfit_view_track'),
+    path('<uuid:outfit_uuid>/tryon-track/', OutfitTryOnTrackView.as_view(), name='outfit_tryon_track'),
 ]

@@ -60,6 +60,8 @@ class OutfitDetailSerializer(serializers.ModelSerializer):
     is_liked = serializers.SerializerMethodField()
     is_saved = serializers.SerializerMethodField()
     like_count = serializers.SerializerMethodField()
+    view_count = serializers.SerializerMethodField()
+    tryon_count = serializers.SerializerMethodField()
     is_owner = serializers.SerializerMethodField()
 
     class Meta:
@@ -80,6 +82,8 @@ class OutfitDetailSerializer(serializers.ModelSerializer):
             'is_liked',
             'is_saved',
             'like_count',
+            'view_count',
+            'tryon_count',
             'is_owner',
         ]
 
@@ -105,6 +109,12 @@ class OutfitDetailSerializer(serializers.ModelSerializer):
     def get_like_count(self, obj):
         return obj.likes.count()
 
+    def get_view_count(self, obj):
+        return obj.views.count()
+
+    def get_tryon_count(self, obj):
+        return obj.tryons.count()
+
     def get_is_owner(self, obj):
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
@@ -120,6 +130,8 @@ class ExploreOutfitSerializer(serializers.ModelSerializer):
     is_liked = serializers.SerializerMethodField()
     is_saved = serializers.SerializerMethodField()
     like_count = serializers.SerializerMethodField()
+    view_count = serializers.SerializerMethodField()
+    tryon_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Outfit
@@ -135,6 +147,8 @@ class ExploreOutfitSerializer(serializers.ModelSerializer):
             'is_liked',
             'is_saved',
             'like_count',
+            'view_count',
+            'tryon_count',
         ]
 
     def get_creator(self, obj):
@@ -181,6 +195,12 @@ class ExploreOutfitSerializer(serializers.ModelSerializer):
 
     def get_like_count(self, obj):
         return obj.likes.count()
+
+    def get_view_count(self, obj):
+        return obj.views.count()
+
+    def get_tryon_count(self, obj):
+        return obj.tryons.count()
 
 
 class OutfitCreateSerializer(serializers.ModelSerializer):

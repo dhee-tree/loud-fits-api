@@ -1,3 +1,5 @@
+import os
+
 from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
@@ -8,7 +10,25 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api_common.pagination import Paginator
-from .models import Outfit, OutfitItem, OutfitLike, OutfitSave
+
+# Recommendation weights — configurable via environment variables
+WEIGHT_LIKE = int(os.environ.get('RECOM_WEIGHT_LIKE', '3'))
+WEIGHT_SAVE = int(os.environ.get('RECOM_WEIGHT_SAVE', '2'))
+WEIGHT_TRYON = int(os.environ.get('RECOM_WEIGHT_TRYON', '2'))
+WEIGHT_VIEW = int(os.environ.get('RECOM_WEIGHT_VIEW', '1'))
+WEIGHT_CART = int(os.environ.get('RECOM_WEIGHT_CART', '4'))
+TRENDING_DAYS = int(os.environ.get('TRENDING_DAYS', '14'))
+DECAY_EXPONENT = float(os.environ.get('RECOM_DECAY_EXPONENT', '1.5'))
+
+# Recommendation scoring weights for personalised matches
+RECOM_PRODUCT_MATCH = int(os.environ.get('RECOM_PRODUCT_MATCH', '10'))
+RECOM_KEYWORD_MATCH = int(os.environ.get('RECOM_KEYWORD_MATCH', '5'))
+RECOM_KEYWORD_CAP = int(os.environ.get('RECOM_KEYWORD_CAP', '15'))
+RECOM_STORE_MATCH = int(os.environ.get('RECOM_STORE_MATCH', '3'))
+RECOM_OCCASION_MATCH = int(os.environ.get('RECOM_OCCASION_MATCH', '2'))
+RECOM_PRICE_MATCH = int(os.environ.get('RECOM_PRICE_MATCH', '1'))
+from cart.models import CartAddEvent
+from .models import Outfit, OutfitItem, OutfitLike, OutfitSave, OutfitTryOn, OutfitView
 from .serializers import (
     ExploreOutfitSerializer,
     OutfitCreateSerializer,
@@ -291,8 +311,8 @@ class ExploreOutfitListView(generics.ListAPIView):
                 | Q(owner__first_name__icontains=search_term)
                 | Q(owner__last_name__icontains=search_term)
                 | Q(owner__username__icontains=search_term)
-                | Q(owner__email__icontains=search_term)
-            )
+                | Q(items__product_name__icontains=search_term)
+            ).distinct()
 
         store_filter = self.request.query_params.get('store', '').strip()
         if store_filter:
@@ -367,3 +387,221 @@ class OutfitSaveView(APIView):
         outfit = get_object_or_404(Outfit, uuid=outfit_uuid)
         OutfitSave.objects.filter(user=request.user, outfit=outfit).delete()
         return Response({'saved': False}, status=status.HTTP_200_OK)
+
+
+class OutfitViewTrackView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, outfit_uuid):
+        outfit = get_object_or_404(Outfit, uuid=outfit_uuid, status=Outfit.Status.PUBLISHED, is_hidden=False)
+
+        user = request.user if request.user.is_authenticated else None
+        session_id = request.data.get('session_id', '')
+
+        dedup_seconds = int(os.environ.get('VIEW_DEDUP_SECONDS', '3600'))
+        cutoff = timezone.now() - timezone.timedelta(seconds=dedup_seconds)
+
+        if user:
+            recent = OutfitView.objects.filter(user=user, outfit=outfit, created_at__gte=cutoff).exists()
+        elif session_id:
+            recent = OutfitView.objects.filter(session_id=session_id, outfit=outfit, created_at__gte=cutoff).exists()
+        else:
+            recent = False
+
+        if not recent:
+            OutfitView.objects.create(user=user, outfit=outfit, session_id=session_id)
+
+        return Response({'recorded': not recent}, status=status.HTTP_200_OK)
+
+
+class OutfitTryOnTrackView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, outfit_uuid):
+        outfit = get_object_or_404(Outfit, uuid=outfit_uuid, status=Outfit.Status.PUBLISHED, is_hidden=False)
+        OutfitTryOn.objects.create(user=request.user, outfit=outfit)
+        return Response({'recorded': True}, status=status.HTTP_201_CREATED)
+
+
+class TrendingOutfitListView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        now = timezone.now()
+
+        candidates = list(
+            Outfit.objects.filter(
+                status=Outfit.Status.PUBLISHED,
+                is_hidden=False,
+                published_at__isnull=False,
+                published_at__gte=now - timezone.timedelta(days=TRENDING_DAYS),
+            ).select_related('owner').prefetch_related('items', 'likes', 'saves', 'tryons', 'views', 'cart_adds')
+            [:100]
+        )
+
+        scored = []
+        for outfit in candidates:
+            engagement = (
+                outfit.likes.count() * WEIGHT_LIKE
+                + outfit.saves.count() * WEIGHT_SAVE
+                + outfit.tryons.count() * WEIGHT_TRYON
+                + outfit.views.count() * WEIGHT_VIEW
+                + outfit.cart_adds.count() * WEIGHT_CART
+            )
+            hours = max((now - outfit.published_at).total_seconds() / 3600, 1)
+            score = engagement / (hours ** DECAY_EXPONENT)
+            scored.append((score, outfit))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top_outfits = [item[1] for item in scored[:10]]
+
+        serializer = ExploreOutfitSerializer(
+            top_outfits, many=True, context={'request': request}
+        )
+        return Response(serializer.data)
+
+
+class RecommendedOutfitListView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        if not request.user.is_authenticated:
+            return self._fallback_trending(request)
+
+        liked_outfit_ids = OutfitLike.objects.filter(user=request.user).values_list('outfit_id', flat=True)
+        saved_outfit_ids = OutfitSave.objects.filter(user=request.user).values_list('outfit_id', flat=True)
+        carted_outfit_ids = CartAddEvent.objects.filter(user=request.user).values_list('outfit_id', flat=True)
+        interacted_ids = set(liked_outfit_ids) | set(saved_outfit_ids) | set(carted_outfit_ids)
+
+        if not interacted_ids:
+            return self._fallback_trending(request)
+
+        liked_items = OutfitItem.objects.filter(outfit_id__in=interacted_ids)
+
+        product_ids = set(liked_items.values_list('product_id', flat=True))
+        store_slugs = set(liked_items.values_list('store_slug', flat=True))
+
+        name_keywords = set()
+        for name in liked_items.values_list('product_name', flat=True):
+            for word in name.lower().split():
+                cleaned = ''.join(c for c in word if c.isalnum())
+                if len(cleaned) >= 3:
+                    name_keywords.add(cleaned)
+
+        prices = [p for p in liked_items.values_list('price', flat=True) if p is not None]
+        min_price = float(min(prices)) * 0.7 if prices else 0
+        max_price = float(max(prices)) * 1.3 if prices else 9999
+
+        liked_occasions = set(
+            Outfit.objects.filter(uuid__in=interacted_ids, occasion__isnull=False)
+            .exclude(occasion='')
+            .values_list('occasion', flat=True)
+        )
+
+        candidates = (
+            Outfit.objects.filter(
+                status=Outfit.Status.PUBLISHED,
+                is_hidden=False,
+                published_at__isnull=False,
+            )
+            .exclude(uuid__in=interacted_ids)
+            .exclude(owner=request.user)
+            .select_related('owner')
+            .prefetch_related('items')
+            [:100]
+        )
+
+        scored = []
+        for outfit in candidates:
+            score = 0
+            reason = ""
+            outfit_items = list(outfit.items.all())
+
+            for item in outfit_items:
+                if item.product_id in product_ids:
+                    score += RECOM_PRODUCT_MATCH
+                    if not reason:
+                        reason = f"Features {item.product_name}"
+
+            keyword_score = 0
+            for item in outfit_items:
+                item_words = {w.lower() for w in item.product_name.split() if len(w) >= 3}
+                matches = item_words & name_keywords
+                if matches:
+                    keyword_score += len(matches) * RECOM_KEYWORD_MATCH
+                    if not reason:
+                        reason = "Similar to products you liked"
+            score += min(keyword_score, RECOM_KEYWORD_CAP)
+
+            for item in outfit_items:
+                if item.store_slug in store_slugs:
+                    score += RECOM_STORE_MATCH
+                    if not reason:
+                        reason = f"From {item.store_name}"
+
+            if outfit.occasion and outfit.occasion in liked_occasions:
+                score += RECOM_OCCASION_MATCH
+                if not reason:
+                    reason = f"Popular in {outfit.occasion}"
+
+            for item in outfit_items:
+                if item.price and min_price <= float(item.price) <= max_price:
+                    score += RECOM_PRICE_MATCH
+                    break
+
+            if not reason:
+                reason = "Recommended for you"
+
+            if score > 0:
+                scored.append((score, reason, outfit))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top_outfits = scored[:10]
+
+        serializer = ExploreOutfitSerializer(
+            [item[2] for item in top_outfits],
+            many=True,
+            context={'request': request},
+        )
+
+        results = serializer.data
+        for i, item in enumerate(top_outfits):
+            if i < len(results):
+                results[i]['recommendation_reason'] = item[1]
+
+        return Response(results)
+
+    def _fallback_trending(self, request):
+        now = timezone.now()
+
+        candidates = list(
+            Outfit.objects.filter(
+                status=Outfit.Status.PUBLISHED,
+                is_hidden=False,
+                published_at__isnull=False,
+                published_at__gte=now - timezone.timedelta(days=TRENDING_DAYS),
+            ).select_related('owner').prefetch_related('items', 'likes', 'saves', 'tryons', 'views', 'cart_adds')
+            [:100]
+        )
+
+        scored = []
+        for outfit in candidates:
+            engagement = (
+                outfit.likes.count() * WEIGHT_LIKE
+                + outfit.saves.count() * WEIGHT_SAVE
+                + outfit.tryons.count() * WEIGHT_TRYON
+                + outfit.views.count() * WEIGHT_VIEW
+                + outfit.cart_adds.count() * WEIGHT_CART
+            )
+            hours = max((now - outfit.published_at).total_seconds() / 3600, 1)
+            score = engagement / (hours ** DECAY_EXPONENT)
+            scored.append((score, outfit))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top_outfits = [item[1] for item in scored[:10]]
+
+        serializer = ExploreOutfitSerializer(top_outfits, many=True, context={'request': request})
+        results = serializer.data
+        for item in results:
+            item['recommendation_reason'] = 'Trending now'
+        return Response(results)

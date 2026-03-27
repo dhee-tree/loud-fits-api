@@ -1,3 +1,4 @@
+import uuid as uuid_module
 from rest_framework import serializers
 from django.utils.text import slugify
 from user.models import User
@@ -32,7 +33,7 @@ class RegisterSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data.pop('password_confirm')
         password = validated_data.pop('password')
-        validated_data['username'] = validated_data['email']
+        validated_data['username'] = f"user_{uuid_module.uuid4().hex[:8]}"
         user = User(**validated_data)
         user.set_password(password)
         user.save()
@@ -75,7 +76,7 @@ class StoreRegisterSerializer(serializers.Serializer):
         # Create user with account_type=STORE
         user = User(
             email=email,
-            username=email,
+            username=f"store_{uuid_module.uuid4().hex[:8]}",
             account_type=User.AccountType.STORE,
             first_name=first_name,
             last_name=last_name,

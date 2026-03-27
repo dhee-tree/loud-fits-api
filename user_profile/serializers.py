@@ -8,5 +8,6 @@ class ProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = Profile
         fields = ['uuid', 'shopping_preference', 'avatar_size',
-                  'profile_picture', 'stylist_enabled', 'onboarding_completed']
+                  'profile_picture', 'bio', 'portfolio_url', 'is_hireable',
+                  'stylist_enabled', 'onboarding_completed']
         read_only_fields = ['uuid']

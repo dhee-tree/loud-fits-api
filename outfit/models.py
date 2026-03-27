@@ -174,3 +174,31 @@ class OutfitSave(models.Model):
 
     def __str__(self):
         return f"{self.user.email} saved {self.outfit.uuid}"
+
+
+class OutfitView(models.Model):
+    uuid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='outfit_views', null=True, blank=True)
+    outfit = models.ForeignKey(Outfit, on_delete=models.CASCADE, related_name='views')
+    session_id = models.CharField(max_length=64, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        identifier = self.user.email if self.user else self.session_id or 'anonymous'
+        return f"{identifier} viewed {self.outfit.uuid}"
+
+
+class OutfitTryOn(models.Model):
+    uuid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='outfit_tryons')
+    outfit = models.ForeignKey(Outfit, on_delete=models.CASCADE, related_name='tryons')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.email} tried on {self.outfit.uuid}"
