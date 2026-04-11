@@ -229,6 +229,10 @@ if AWS_S3_ENABLED:
                 f'{AWS_S3_REGION_NAME}.amazonaws.com/media/public/'
             )
 
+# Security settings
+if config("TRUST_X_FORWARDED_PROTO", default=False, cast=bool):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 # CSRF settings
 CSRF_TRUSTED_ORIGINS = config("CSRF_TRUSTED_ORIGINS").split(",")
 
