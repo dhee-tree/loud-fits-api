@@ -31,6 +31,12 @@ def product_tryon_asset_upload_to(instance, filename):
     return f"products/{instance.uuid}/3d/{instance.uuid}-{unique_suffix}{extension}"
 
 
+class ShoppingPreferenceChoices(models.TextChoices):
+    MENSWEAR = 'menswear', 'Menswear'
+    WOMENSWEAR = 'womenswear', 'Womenswear'
+    UNISEX = 'unisex', 'Unisex'
+
+
 class Product(models.Model):
     LOW_STOCK_THRESHOLD = 10
 
@@ -45,6 +51,11 @@ class Product(models.Model):
     category = models.CharField(
         max_length=20,
         choices=CategoryChoices.choices
+    )
+    shopping_preference = models.CharField(
+        max_length=20,
+        choices=ShoppingPreferenceChoices.choices,
+        default=ShoppingPreferenceChoices.UNISEX,
     )
     image_url = models.URLField(max_length=2048)
     uploaded_image = models.ImageField(

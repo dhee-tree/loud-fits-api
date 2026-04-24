@@ -5,11 +5,11 @@ from .models import Outfit, OutfitItem
 
 
 def get_creator_display_name(user):
+    if user.username:
+        return user.username
     full_name = f"{user.first_name} {user.last_name}".strip()
     if full_name:
         return full_name
-    if user.username:
-        return user.username
     if user.email:
         return user.email.split('@')[0]
     return 'User'

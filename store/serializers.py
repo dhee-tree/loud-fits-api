@@ -4,7 +4,7 @@ from django.core.validators import URLValidator
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils.text import slugify
 from api_common.media import build_private_media_url
-from product.models import CategoryChoices, ProductImportBatch
+from product.models import CategoryChoices, ProductImportBatch, ShoppingPreferenceChoices
 from .models import Store
 
 MAX_LOGO_FILE_SIZE = 2 * 1024 * 1024
@@ -187,6 +187,25 @@ def validate_feed_products(products: list) -> dict:
                 'error': 'Try-on template key must be a string.',
             })
 
+        shopping_preference_raw = product.get('shopping_preference')
+        shopping_preference = ShoppingPreferenceChoices.UNISEX
+        if shopping_preference_raw not in (None, ''):
+            if not isinstance(shopping_preference_raw, str):
+                product_errors.append({
+                    'field': 'shopping_preference',
+                    'error': 'Shopping preference must be a string.',
+                })
+            else:
+                normalised = shopping_preference_raw.strip().lower()
+                valid_preferences = {choice[0] for choice in ShoppingPreferenceChoices.choices}
+                if normalised not in valid_preferences:
+                    product_errors.append({
+                        'field': 'shopping_preference',
+                        'error': f"Invalid shopping preference. Must be one of: {', '.join(sorted(valid_preferences))}",
+                    })
+                else:
+                    shopping_preference = normalised
+
         if product_errors:
             errors.append({
                 'index': index,
@@ -204,6 +223,7 @@ def validate_feed_products(products: list) -> dict:
                 'product_url': product['product_url'],
                 'stock_quantity': stock_quantity,
                 'tryon_template_key': (tryon_template_key or '').strip() or None,
+                'shopping_preference': shopping_preference,
             }
             valid_products.append(valid_product)
             # Count by category

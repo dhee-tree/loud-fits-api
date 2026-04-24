@@ -1,5 +1,5 @@
 from django_filters import rest_framework as filters
-from .models import Product, CategoryChoices, StockStatus
+from .models import Product, CategoryChoices, StockStatus, ShoppingPreferenceChoices
 
 
 class StoreSlugInFilter(filters.BaseInFilter, filters.CharFilter):
@@ -10,6 +10,7 @@ class BaseProductFilter(filters.FilterSet):
     category = filters.ChoiceFilter(choices=CategoryChoices.choices)
     is_active = filters.BooleanFilter()
     stock_status = filters.ChoiceFilter(choices=StockStatus.choices)
+    shopping_preference = filters.ChoiceFilter(choices=ShoppingPreferenceChoices.choices)
 
 
 class ProductBrowseFilter(BaseProductFilter):
@@ -17,4 +18,4 @@ class ProductBrowseFilter(BaseProductFilter):
 
     class Meta:
         model = Product
-        fields = ["stores", "category", "is_active", "stock_status"]
+        fields = ["stores", "category", "is_active", "stock_status", "shopping_preference"]
